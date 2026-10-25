@@ -1,0 +1,25 @@
+# Edge proxy. OMNI_DOMAIN:
+#   * a real DNS name pointing at this VM  -> automatic Let's Encrypt certificate
+#   * localhost / an IP address            -> certificate from Caddy's internal CA
+{$OMNI_DOMAIN:localhost} {
+	encode zstd gzip
+
+	# Internal hooks (MediaMTX auth, ...) must never be reachable from outside.
+	handle /internal/* {
+		respond 404
+	}
+
+	@backend path /api/* /ws/* /healthz
+	handle @backend {
+		reverse_proxy api:8000
+	}
+
+	handle {
+		reverse_proxy web:80
+	}
+
+	log {
+		output stdout
+		format json
+	}
+}

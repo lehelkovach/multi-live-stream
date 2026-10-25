@@ -1,0 +1,85 @@
+# OmniStream stack. `docker compose up -d --build` (= make up) brings everything up.
+# Target platform: linux/arm64 (OCI Ampere A1); every image below is multi-arch.
+name: omnistream
+
+x-app-env: &app-env
+  OMNI_DATABASE_URL: ${OMNI_DATABASE_URL:-sqlite:////data/omnistream.db}
+  OMNI_REDIS_URL: ${OMNI_REDIS_URL:-redis://redis:6379/0}
+  OMNI_MEDIAMTX_API_URL: ${OMNI_MEDIAMTX_API_URL:-http://mediamtx:9997}
+  OMNI_MEDIAMTX_RTSP_URL: ${OMNI_MEDIAMTX_RTSP_URL:-rtsp://mediamtx:8554}
+
+services:
+  # ---- edge: TLS + routing -------------------------------------------------
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      OMNI_DOMAIN: ${OMNI_DOMAIN:-localhost}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - api
+      - web
+
+  # ---- dashboard (static build served by a tiny Caddy) ---------------------
+  web:
+    build: ./web
+    image: omnistream-web:local
+    restart: unless-stopped
+    expose:
+      - "80"
+
+  # ---- API -----------------------------------------------------------------
+  api:
+    build: .
+    image: omnistream-app:local
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: true
+    environment:
+      <<: *app-env
+    volumes:
+      - app_data:/data
+    expose:
+      - "8000"
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  # ---- state / pub-sub -----------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--save", "60", "1"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # ---- ingest --------------------------------------------------------------
+  mediamtx:
+    image: bluenviron/mediamtx:1.21.3
+    restart: unless-stopped
+    ports:
+      - "1935:1935"       # RTMP publish (OBS)
+      - "8890:8890/udp"   # SRT publish
+    volumes:
+      - ./ingest/mediamtx.yml:/mediamtx.yml:ro
+    depends_on:
+      - api
+
+volumes:
+  app_data:
+  redis_data:
+  caddy_data:
+  caddy_config:

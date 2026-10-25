@@ -1,0 +1,36 @@
+# secrets / local config
+.env
+.env.*
+!.env.example
+
+# python
+__pycache__/
+*.py[cod]
+.venv/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+build/
+dist/
+htmlcov/
+.coverage
+
+# node / web
+web/node_modules/
+web/dist/
+web/playwright-report/
+web/test-results/
+node_modules/
+
+# runtime data
+data/
+*.db
+*.db-wal
+*.db-shm
+*.log
+
+# editors / os
+.idea/
+.vscode/
+.DS_Store

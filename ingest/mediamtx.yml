@@ -1,0 +1,53 @@
+# MediaMTX configuration for OmniStream ingest.
+# Only the keys we change are listed; everything else keeps MediaMTX defaults.
+# Reference: https://github.com/bluenviron/mediamtx (v1.21.x)
+
+logLevel: info
+logDestinations: [stdout]
+
+# ---- authentication --------------------------------------------------------
+# Every publish/read request is sent to our API, which checks the stream key
+# (publish) or the client network (read). Management actions on ports that are
+# never published outside the Compose network are excluded from the hook.
+authMethod: http
+authHTTPAddress: http://api:8000/internal/mediamtx/auth
+authHTTPExclude:
+  - action: api
+  - action: metrics
+  - action: pprof
+  - action: playback
+
+# ---- control / metrics (Compose-internal only) ----------------------------
+api: yes
+apiAddress: :9997
+metrics: yes
+metricsAddress: :9998
+pprof: no
+playback: no
+
+# ---- protocols -------------------------------------------------------------
+rtsp: yes                 # relay workers pull from here (internal)
+rtspAddress: :8554
+rtspTransports: [tcp]
+rtspEncryption: "no"
+
+rtmp: yes                 # OBS publishes here (public :1935)
+rtmpAddress: :1935
+rtmpEncryption: "no"
+
+srt: yes                  # alternative publish path (public :8890/udp)
+srtAddress: :8890
+
+hls: no
+webrtc: no
+
+# ---- paths -----------------------------------------------------------------
+pathDefaults:
+  source: publisher
+  # A reconnecting OBS (network blip) replaces the stale publisher immediately
+  # instead of being rejected until the old session times out.
+  overridePublisher: yes
+  record: no
+
+paths:
+  all_others:

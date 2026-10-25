@@ -1,0 +1,91 @@
+[project]
+name = "omnistream"
+version = "0.1.0"
+description = "Self-hosted multistream relay + unified chat (OmniStream)"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+dependencies = [
+    "fastapi>=0.115,<1",
+    "uvicorn[standard]>=0.30,<1",
+    "sqlmodel>=0.0.22,<0.1",
+    "sqlalchemy>=2.0,<3",
+    "pydantic>=2.7,<3",
+    "pydantic-settings>=2.3,<3",
+    "redis>=5.0,<9",
+    "argon2-cffi>=23.1,<26",
+    "cryptography>=43,<51",
+    "httpx>=0.27,<1",
+    "itsdangerous>=2.2,<3",
+    "structlog>=24,<27",
+    "python-multipart>=0.0.9,<1",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8,<10",
+    "pytest-asyncio>=0.24,<2",
+    "fakeredis>=2.24,<3",
+    "ruff>=0.6,<1",
+    "mypy>=1.11,<3",
+    "types-requests",
+]
+
+[project.scripts]
+omnistream = "api.cli:main"
+
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["core", "api", "relay", "chat"]
+
+# ----------------------------------------------------------------- ruff ----
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+extend-exclude = ["web", "mobile", ".venv"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF", "ASYNC", "PT", "N", "C4", "T20"]
+ignore = [
+    "RUF012", # mutable class attributes (SQLModel/pydantic patterns)
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["T20", "S101"]
+"scripts/**" = ["T20"]
+"api/cli.py" = ["T20"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["core", "api", "relay", "chat"]
+
+# ----------------------------------------------------------------- mypy ----
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_unreachable = true
+pretty = true
+show_error_codes = true
+plugins = ["pydantic.mypy"]
+files = ["core", "api", "relay", "chat", "tests", "scripts"]
+exclude = ["^web/", "^mobile/", "^\\.venv/"]
+
+[[tool.mypy.overrides]]
+module = ["tests.*"]
+disallow_untyped_decorators = false
+
+[[tool.mypy.overrides]]
+module = ["fakeredis.*", "argon2.*"]
+ignore_missing_imports = true
+
+# --------------------------------------------------------------- pytest ----
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+markers = [
+    "integration: needs real binaries (mediamtx, ffmpeg, redis-server); skipped when missing",
+]
+filterwarnings = ["error::DeprecationWarning:core", "error::DeprecationWarning:api"]
