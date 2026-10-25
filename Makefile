@@ -11,7 +11,7 @@ S       ?=            # service name for logs/restart, e.g. make logs S=api
 
 .PHONY: help init-env up down restart build ps logs venv test test-integration test-e2e lint fmt \
         web-install web-build web-lint secret hash-password check-config compose-config \
-        dev-api dev-web clean
+        dev-api dev-web clean backup prune
 
 help: ## show this help
 	@grep -hE '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
@@ -91,6 +91,15 @@ secret: ## print a random key (Fernet-compatible) for .env
 hash-password: ## print an argon2 hash for OMNI_ADMIN_PASSWORD_HASH
 	@if command -v $(UV) >/dev/null 2>&1; then $(UV) run --frozen omnistream hash-password; \
 	else $(COMPOSE) run --rm --no-deps api omnistream hash-password; fi
+
+# ---------------------------------------------------------------- backups ----
+backup: ## snapshot the database inside the api container and copy it to ./backups/
+	$(COMPOSE) exec -T api omnistream backup
+	mkdir -p backups && $(COMPOSE) cp api:/data/backups/. ./backups/
+	@echo "copied to ./backups/ - keep a copy of .env with it (encryption key)"
+
+prune: ## delete chat history older than OMNI_CHAT_RETENTION_DAYS (default 30)
+	$(COMPOSE) exec -T api omnistream prune
 
 clean: ## remove caches and build outputs
 	rm -rf .pytest_cache .mypy_cache .ruff_cache web/dist

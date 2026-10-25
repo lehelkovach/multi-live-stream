@@ -95,6 +95,12 @@ class Settings(BaseSettings):
     chat_send_max_wait: float = 10.0  # seconds a send may wait for a rate-limit slot
     chat_send_timeout: float = 20.0  # seconds per platform call
 
+    # --- ops ---------------------------------------------------------------
+    metrics_token: SecretStr = SecretStr("")  # bearer token for /metrics (Prometheus)
+    backup_dir: str = "/data/backups"
+    backup_keep: int = 14
+    chat_retention_days: int = 30  # `omnistream prune` deletes older chat history
+
     # --- misc --------------------------------------------------------------
     log_level: str = "info"
     log_format: LogFormat = "json"

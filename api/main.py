@@ -20,7 +20,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from api.auth import LoginRateLimiter, PasswordVerifier, SessionSigner
-from api.routers import auth, chat, destinations, health, ingest, relay, ws
+from api.routers import auth, chat, destinations, health, ingest, metrics, relay, ws
 from chat.kick_webhook import PublicKeyCache
 from core import __version__
 from core.crypto import SecretBox
@@ -76,6 +76,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(chat.router)
     app.include_router(chat.webhooks)
     app.include_router(ws.router)
+    app.include_router(metrics.router)
     _mount_web(app, Path(settings.web_dist_dir))
     return app
 

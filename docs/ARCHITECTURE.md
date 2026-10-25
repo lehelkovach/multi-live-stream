@@ -1,6 +1,6 @@
 # OmniStream architecture
 
-Status: Phase 4 (replies + broadcast) complete. This document is updated at the start of
+Status: Phases 0-4 and 6 complete; Phase 5 is a documented spike (`docs/mobile-spike.md`) awaiting hands-on results on the VM. This document is updated at the start of
 each phase with the plan for that phase, and at the end with what was actually
 built.
 
@@ -248,6 +248,29 @@ done the summary status (`sent` / `partial` / `failed`) is stored and a final
 `chat.outgoing` event with `done: true` is published. The dashboard tracks the
 row it created and updates ticks per platform as events arrive; platform echoes
 of our own message arrive through the normal read path as `is_own`.
+
+## Operations (Phase 6)
+
+* **Metrics**: `GET /metrics` builds a fresh Prometheus registry per scrape from
+  Redis runtime blobs + two small DB aggregates, so there is no metrics state to
+  keep in sync and a dead relay/chat process shows as
+  `omnistream_service_heartbeat_age_seconds{service=...}` growing (or `+Inf`).
+  Auth: dashboard cookie or `Authorization: Bearer $OMNI_METRICS_TOKEN`.
+  `GET /api/v1/stats` is the JSON twin for the dashboard.
+* **Logs**: every process logs structured JSON to stdout (`OMNI_LOG_FORMAT=json`);
+  `make logs S=relay` to follow one service, `docker compose logs --since 1h api`
+  for a window. Events carry `event`, `level`, `logger`, `timestamp` and context
+  keys such as `dest_id` / `account_id`.
+* **Backups**: `omnistream backup` uses SQLite's online backup API (consistent
+  while the services run) into `/data/backups`, keeping `OMNI_BACKUP_KEEP`
+  snapshots; `make backup` copies them to `./backups/` on the host. The `.env`
+  file is part of the backup set because `OMNI_SECRET_KEY` decrypts stored
+  credentials. Restore = stop the stack, copy a snapshot over
+  `/data/omnistream.db` in the `app_data` volume, start.
+* **Retention**: `omnistream prune` deletes chat history and outgoing messages
+  older than `OMNI_CHAT_RETENTION_DAYS`.
+* **Network**: see `deploy/README.md` for the OCI security list + host firewall
+  rules and the egress estimate.
 
 ## Local development & tests
 

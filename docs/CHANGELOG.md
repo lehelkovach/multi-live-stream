@@ -2,6 +2,27 @@
 
 One entry per completed phase (plus notable fixes). Newest first.
 
+## Phase 6 - Hardening (2026-10-25)
+
+* `GET /metrics` (Prometheus text format; dashboard session or
+  `OMNI_METRICS_TOKEN` bearer): ingest live/bitrate, service heartbeat ages,
+  per-destination status/bitrate/uptime/restarts, chat account status, chat
+  messages and outgoing sends today, YouTube quota units spent today.
+  `GET /api/v1/stats` returns the same data as JSON.
+* `omnistream backup` (SQLite online backup with rotation) and `make backup`
+  (copies snapshots to `./backups/`); `omnistream prune` / `make prune` for chat
+  history retention (`OMNI_CHAT_RETENTION_DAYS`, default 30).
+* deploy/README: OCI security list + host firewall checklist, backup cron, egress
+  estimate table, log inspection.
+
+## Phase 5a - Mobile spike document (2026-10-25)
+
+* `docs/mobile-spike.md`: desk research + VM runbook for Redroid on arm64 OCI
+  (kernel modules, `_64only` images, memfd), a comparison of virtual-camera
+  options, per-app detection/ToS checklist, ADB-over-Tailscale fallback and the
+  go/no-go criteria. Hands-on findings are left for the owner to fill in on the
+  VM; nothing in `mobile/` is built until then.
+
 ## Phase 4 - Replies + broadcast (2026-10-25)
 
 * `POST /api/v1/chat/send` (`targets: "all" | [ids]`, optional `reply_to`) queues an

@@ -20,6 +20,7 @@ dependencies = [
     "structlog>=24,<27",
     "python-multipart>=0.0.9,<1",
     "websockets>=13,<18",
+    "prometheus-client>=0.20,<1",
 ]
 
 [dependency-groups]

@@ -41,7 +41,7 @@ If you set `OMNI_DOMAIN` to a real DNS name Caddy obtains a Let's Encrypt
 certificate automatically. With `localhost` or a bare IP it issues a self-signed
 certificate (expect a browser warning / use `curl -k`).
 
-## What works today (Phase 4)
+## What works today
 
 * Ingest with a secret stream key (RTMP + SRT), rejected otherwise.
 * Relay: one supervised `ffmpeg -c copy` per enabled destination, auto-restart with
@@ -54,7 +54,10 @@ certificate (expect a browser warning / use `curl -k`).
   and badges, and are kept as history. Reply to one platform or broadcast to all
   from the compose bar, with per-platform delivery status and rate limiting.
   Register the OAuth apps first: see `docs/TODO-owner.md`.
-* Not yet: mobile apps (Phase 5), metrics/backups (Phase 6).
+* Operations: Prometheus `/metrics`, JSON `/api/v1/stats`, `make backup`, `make prune`,
+  structured JSON logs. See `deploy/README.md`.
+* Mobile apps (Phase 5) are at the spike stage: `docs/mobile-spike.md` has the
+  runbook to execute on the VM before anything is built.
 
 ## Day-to-day
 
@@ -70,6 +73,8 @@ certificate (expect a browser warning / use `curl -k`).
 | `make secret`        | print a random key for `.env`                             |
 | `make hash-password` | print an argon2 hash for `OMNI_ADMIN_PASSWORD_HASH`       |
 | `make check-config`  | validate `.env` inside the api container                  |
+| `make backup`        | SQLite snapshot (with rotation) copied to `./backups/`    |
+| `make prune`         | delete chat history older than the retention period       |
 
 ## Development (outside Docker)
 

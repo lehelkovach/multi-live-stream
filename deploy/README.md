@@ -41,9 +41,67 @@ images. If `curl -I http://<ip>` hangs from outside, this is why.
 
 ## Egress / bandwidth (estimate)
 
-Each destination receives a full copy of the ingest bitrate. 6 Mbps ingest × 5
-destinations ≈ 30 Mbps sustained ≈ 13.5 GB/hour. OCI's Always Free tier includes
-10 TB/month egress; more detail in Phase 6.
+Each destination receives a full copy of the ingest bitrate (stream copy, no
+re-encode), so egress ≈ ingest bitrate × enabled destinations. Chat traffic is
+negligible.
+
+| Ingest bitrate | Destinations | Sustained egress | Per hour | 4 h stream, 5 days/week, per month |
+|----------------|--------------|------------------|----------|------------------------------------|
+| 4.5 Mbps (1080p30) | 3 | 13.5 Mbps | 6.1 GB | ~0.5 TB |
+| 6 Mbps (1080p60) | 5 | 30 Mbps | 13.5 GB | ~1.2 TB |
+| 8 Mbps | 6 | 48 Mbps | 21.6 GB | ~1.9 TB |
+
+OCI's Always Free tier includes 10 TB/month of outbound transfer; the A1 shape's
+network bandwidth (1 Gbps per OCPU, capped) is not the bottleneck at these rates.
+`vertical_720p` adds CPU (libx264 veryfast at 720x1280 is roughly one A1 core)
+but not egress.
+
+## Backups
+
+```bash
+make backup                 # snapshot inside the container + copy to ./backups/
+ls backups/                 # omnistream-YYYYmmdd-HHMMSS.db
+```
+
+Schedule it on the host (`crontab -e`):
+
+```
+17 4 * * * cd /home/ubuntu/omnistream && make backup >> backups/backup.log 2>&1
+```
+
+Copy `backups/` **and `.env`** off the VM (OCI Object Storage, rclone, or scp);
+the Fernet key in `.env` is required to read the stored stream keys and tokens.
+
+Restore:
+
+```bash
+make down
+docker run --rm -v omnistream_app_data:/data -v "$PWD/backups:/b" alpine \
+  sh -c 'cp /b/omnistream-YYYYmmdd-HHMMSS.db /data/omnistream.db && rm -f /data/omnistream.db-wal /data/omnistream.db-shm'
+make up
+```
+
+Chat history retention: `make prune` (default 30 days, `OMNI_CHAT_RETENTION_DAYS`).
+
+## Metrics
+
+`https://<domain>/metrics` serves Prometheus text format. From a scraper, set
+`OMNI_METRICS_TOKEN` in `.env` and use `Authorization: Bearer <token>`; from a
+browser the dashboard session is enough. Useful alerts:
+
+* `omnistream_service_heartbeat_age_seconds > 60` (relay or chat process down)
+* `omnistream_destination_status{status=~"error|retrying"} == 1` for 5 minutes
+* `omnistream_ingest_live == 0` during a scheduled stream
+
+## Security checklist
+
+- [ ] Security list / NSG: 80, 443 tcp (+443 udp) from anywhere; 1935 tcp and
+      8890 udp only from your streaming IPs; nothing else inbound except SSH.
+- [ ] Host iptables rules from the Network section persisted.
+- [ ] `.env` is mode 600 and never committed; `make check-config` passes.
+- [ ] Stream key rotated if it was ever pasted somewhere public (`make secret`,
+      update `OMNI_INGEST_STREAM_KEY`, `make up`).
+- [ ] `docker compose pull && make up` monthly for base-image updates.
 
 ## Operations
 
