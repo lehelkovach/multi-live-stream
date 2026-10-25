@@ -137,3 +137,24 @@ export interface ChatAccountInput {
   enabled: boolean;
   extra: Record<string, unknown>;
 }
+
+export interface Delivery {
+  account_id: number;
+  platform: string;
+  name: string;
+  status: "pending" | "sent" | "failed" | "rate_limited" | "offline" | "unsupported" | string;
+  error: string | null;
+  message_id: string | null;
+  at: number | null;
+}
+
+export interface Outgoing {
+  id: number;
+  text: string;
+  targets: string[];
+  status: "pending" | "sent" | "partial" | "failed" | string;
+  reply_to: string | null;
+  deliveries: Delivery[];
+  created_at: string;
+  finished_at: string | null;
+}

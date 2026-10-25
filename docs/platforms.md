@@ -38,6 +38,30 @@ Verified against the official docs on 2026-10-25. Each row is what the adapter i
 | Facebook | SSE `https://streaming-graph.facebook.com/{live-video-id}/live_comments` with a Page token; fallback polling `GET /{live-video-id}/comments?order=reverse_chronological&live_filter=no_filter` every 3 s. Live video found via `GET /{page-id}/live_videos?broadcast_status=["LIVE"]`. | Not available on the live-video comments edge per the current reference; to be verified in Phase 4 (likely `POST /{video-id}/comments`). | Facebook Login → long-lived user token → Page tokens from `/me/accounts`; permissions `pages_show_list`, `pages_read_engagement`, `pages_read_user_content`, `pages_manage_engagement`. App review needed for non-admin use. | Pasting a Page access token manually also works (`channel_ref` = Page id). |
 | X | — | — | — | X has no public live chat API; chat can only be reached via Phase 5 mobile automation. |
 
+### Sending (Phase 4)
+
+`POST /api/v1/chat/send` with `targets: "all"` or a list of account ids. The chat
+service fans out concurrently, one task per target, and records a per-target
+status: `sent`, `failed` (platform error), `rate_limited` (next slot further away
+than `OMNI_CHAT_SEND_MAX_WAIT`), `offline` (account not connected) or
+`unsupported`. Replies: tapping a message pre-selects its account and passes the
+platform message id as `reply_to`; only the owning platform receives it
+(Twitch `reply_parent_message_id`, Kick `reply_to_message_id`, Facebook comments
+on the comment id; YouTube has no reply primitive, so it sends a plain message).
+
+| Platform | Documented limit | Our default (`OMNI_CHAT_RATE_LIMITS` / `_BURST`) | Max length |
+|----------|------------------|--------------------------------------------------|------------|
+| Twitch | 20 msgs / 30 s (100 as broadcaster, moderator or VIP); 1 msg / s / channel for non-privileged senders | 1 msg/s, burst 5 | 500 chars |
+| YouTube | No per-second limit documented; each insert costs 20 quota units (500 sends on a 10,000-unit day) | 1 msg / 3 s, burst 1 | 200 chars (API) |
+| Kick | Not published; the API answers 429 when exceeded | 1 msg/s, burst 3 | 500 chars / 2048 bytes |
+| Facebook | Page comment publishing is subject to the general Graph API rate limits | 1 msg / 5 s, burst 1 | 8,000 chars |
+| X | No API for live chat | – | – |
+
+Facebook comments are published on the LiveVideo's underlying **Video** object
+(`GET /{live-video-id}?fields=video` → `POST /{video-id}/comments`), which the
+Graph reference lists as a publishable object; this path is implemented per the
+docs and should be confirmed on the first real stream.
+
 ### Quota math for YouTube
 
 `list` costs 5 units, so a 5 s poll is 3,600 units/hour: a 10,000-unit project allows

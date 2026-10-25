@@ -5,6 +5,7 @@ import type {
   ChatMessage,
   ChatPlatformInfo,
   Destination,
+  Outgoing,
   DestinationInput,
   IngestInfo,
   RelayState,
@@ -90,4 +91,7 @@ export const chat = {
     return api<ChatMessage[]>(`/api/v1/chat/messages?${q.toString()}`);
   },
   oauthStart: (platform: string) => api<{ url: string }>(`/api/v1/chat/oauth/${platform}/start`),
+  send: (text: string, targets: number[] | "all", reply_to?: string | null) =>
+    api<Outgoing>("/api/v1/chat/send", json({ text, targets, reply_to: reply_to ?? null })),
+  outgoing: (limit = 20) => api<Outgoing[]>(`/api/v1/chat/outgoing?limit=${limit}`),
 };

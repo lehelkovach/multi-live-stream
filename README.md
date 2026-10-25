@@ -41,7 +41,7 @@ If you set `OMNI_DOMAIN` to a real DNS name Caddy obtains a Let's Encrypt
 certificate automatically. With `localhost` or a bare IP it issues a self-signed
 certificate (expect a browser warning / use `curl -k`).
 
-## What works today (Phase 3)
+## What works today (Phase 4)
 
 * Ingest with a secret stream key (RTMP + SRT), rejected otherwise.
 * Relay: one supervised `ffmpeg -c copy` per enabled destination, auto-restart with
@@ -49,11 +49,12 @@ certificate (expect a browser warning / use `curl -k`).
 * Mobile-first dashboard at `https://<domain>/`: login, add/edit/toggle destinations
   (platform presets for YouTube/Twitch/Facebook/Kick/X), live status over a
   WebSocket, OBS settings with copy buttons. API docs at `/api/docs`.
-* Unified chat (read): connect Twitch, YouTube, Kick and Facebook accounts via OAuth
-  (or a pasted token); messages from every platform land in one pane with platform
-  tags and badges, and are kept as history. Register the OAuth apps first: see
-  `docs/TODO-owner.md`.
-* Not yet: replies/broadcast (Phase 4), mobile apps (Phase 5), metrics/backups (Phase 6).
+* Unified chat: connect Twitch, YouTube, Kick and Facebook accounts via OAuth (or a
+  pasted token); messages from every platform land in one pane with platform tags
+  and badges, and are kept as history. Reply to one platform or broadcast to all
+  from the compose bar, with per-platform delivery status and rate limiting.
+  Register the OAuth apps first: see `docs/TODO-owner.md`.
+* Not yet: mobile apps (Phase 5), metrics/backups (Phase 6).
 
 ## Day-to-day
 

@@ -1,6 +1,6 @@
 # OmniStream architecture
 
-Status: Phase 3 (chat aggregation, read side) complete. This document is updated at the start of
+Status: Phase 4 (replies + broadcast) complete. This document is updated at the start of
 each phase with the plan for that phase, and at the end with what was actually
 built.
 
@@ -234,6 +234,20 @@ reload keeping the session, delete, sign out.
   Redis and paces itself to the configured share of the daily quota.
 * **History**: `GET /api/v1/chat/messages?limit=&before=&platform=`; the Chat tab
   merges the last 200 with live socket messages and dedupes by id.
+
+## Replies and broadcast (Phase 4)
+
+`POST /api/v1/chat/send` writes an `outgoing_message` row (text, targets,
+`per_target_status` pre-filled with `pending` for every enabled target) and
+publishes `chat.send`. The chat manager's `Outbox` loads the row and delivers to
+each target in its own task: look up the running adapter (`offline` if there is
+none), reserve a token in that account's bucket (`rate_limited` if the wait would
+exceed `OMNI_CHAT_SEND_MAX_WAIT`), call `adapter.send()` under a timeout, then
+write the per-target entry and publish `chat.outgoing`. When all targets are
+done the summary status (`sent` / `partial` / `failed`) is stored and a final
+`chat.outgoing` event with `done: true` is published. The dashboard tracks the
+row it created and updates ticks per platform as events arrive; platform echoes
+of our own message arrive through the normal read path as `is_own`.
 
 ## Local development & tests
 

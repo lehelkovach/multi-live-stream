@@ -35,6 +35,8 @@ CHANNEL_WEBHOOKS_KICK = "omni:webhooks:kick"  # api -> kick adapter: verified we
 EVENT_CHAT_ACCOUNTS_CHANGED = "chat.accounts.changed"  # api -> chat manager
 EVENT_CHAT_ACCOUNT_STATUS = "chat.account.status"  # chat manager -> dashboard
 EVENT_CHAT_MESSAGE = "chat.message"  # chat manager -> dashboard (on CHANNEL_CHAT)
+EVENT_CHAT_SEND = "chat.send"  # api -> chat manager: deliver outgoing_message <id>
+EVENT_CHAT_OUTGOING = "chat.outgoing"  # chat manager -> dashboard: per-target delivery status
 
 
 def dest_status_key(dest_id: int) -> str:

@@ -254,7 +254,7 @@ class TwitchAdapter:
         data = json.loads(raw)
         return data if isinstance(data, dict) else {}
 
-    async def send(self, text: str) -> SendResult:
+    async def send(self, text: str, *, reply_to: str | None = None) -> SendResult:
         if not self._client_id:
             await self._validate()
         if not self.broadcaster_id:
@@ -264,6 +264,8 @@ class TwitchAdapter:
             "sender_id": self.user_id,
             "message": text[:500],
         }
+        if reply_to:
+            body["reply_parent_message_id"] = reply_to
         try:
             resp = await self.ctx.http.post(
                 f"{self.helix_url}/chat/messages", json=body, headers=self._headers(), timeout=15

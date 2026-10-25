@@ -5,7 +5,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { chat as chatApi, destinations as destApi, relay as relayApi } from "../api";
-import type { ChatAccount, ChatMessage, Destination, RelayState, Runtime, Status } from "../types";
+import type { ChatAccount, ChatMessage, Delivery, Destination, Outgoing, RelayState, Runtime, Status } from "../types";
 
 export type ConnState = "connecting" | "connected" | "offline";
 
@@ -14,6 +14,7 @@ interface EventsState {
   relay: RelayState | null;
   accounts: ChatAccount[];
   chat: ChatMessage[]; // live messages received over the socket (bounded)
+  outgoing: Outgoing[]; // recent sends with per-target delivery status (newest last)
   conn: ConnState;
   error: string | null;
 }
@@ -31,6 +32,7 @@ type AnyEvent =
   | ({ type: "chat.message" } & ChatMessage)
   | { type: "chat.account.status"; id: number; status: string; detail: string | null; last_error: string | null; updated_at: number | null }
   | { type: "chat.accounts.changed" }
+  | ({ type: "chat.outgoing"; id: number; account_id: number | null; done?: boolean } & Partial<Delivery>)
   | { type: string };
 
 /** Seconds-since-epoch of a runtime blob (handles ISO strings and float seconds). */
@@ -62,6 +64,21 @@ function newest<
   });
 }
 
+function applyOutgoingEvent(
+  o: Outgoing,
+  oe: { id: number; account_id: number | null; done?: boolean } & Partial<Delivery>,
+): Outgoing {
+  if (oe.account_id == null) {
+    return { ...o, status: oe.status ?? o.status, finished_at: oe.done ? new Date().toISOString() : o.finished_at };
+  }
+  const deliveries = o.deliveries.map((d) =>
+    d.account_id === oe.account_id
+      ? { ...d, status: oe.status ?? d.status, error: oe.error ?? null, message_id: oe.message_id ?? null, at: oe.at ?? null }
+      : d,
+  );
+  return { ...o, deliveries };
+}
+
 function mergeRuntime(dest: Destination, evt: DestEvent): Destination {
   const runtime: Runtime = {
     status: evt.status ?? dest.runtime?.status ?? dest.status,
@@ -82,12 +99,15 @@ function mergeRuntime(dest: Destination, evt: DestEvent): Destination {
 }
 
 export function useEvents(enabled: boolean) {
-  const [state, setState] = useState<EventsState>({ destinations: [], relay: null, accounts: [], chat: [], conn: "connecting", error: null });
+  const [state, setState] = useState<EventsState>({ destinations: [], relay: null, accounts: [], chat: [], outgoing: [], conn: "connecting", error: null });
   const wsRef = useRef<WebSocket | null>(null);
   const attemptRef = useRef(0);
   const stoppedRef = useRef(false);
   // status events for accounts the list does not contain yet (created a moment ago)
   const pendingAccountRef = useRef(new Map<number, Pick<ChatAccount, "status" | "last_error" | "runtime">>());
+
+  type OutgoingEvent = { id: number; account_id: number | null; done?: boolean } & Partial<Delivery>;
+  const pendingOutgoingRef = useRef(new Map<number, OutgoingEvent[]>());
 
   const applyPending = useCallback((accounts: ChatAccount[]): ChatAccount[] => {
     const pending = pendingAccountRef.current;
@@ -212,6 +232,20 @@ export function useEvents(enabled: boolean) {
             });
             break;
           }
+          case "chat.outgoing": {
+            const oe = evt as Extract<AnyEvent, { type: "chat.outgoing" }>;
+            setState((s) => {
+              if (!s.outgoing.some((o) => o.id === oe.id)) {
+                // the manager can finish before the browser has processed the POST response
+                const list = pendingOutgoingRef.current.get(oe.id) ?? [];
+                list.push(oe);
+                pendingOutgoingRef.current.set(oe.id, list);
+                return s;
+              }
+              return { ...s, outgoing: s.outgoing.map((o) => (o.id === oe.id ? applyOutgoingEvent(o, oe) : o)) };
+            });
+            break;
+          }
           case "chat.message": {
             const { type: _t, ...message } = evt as Extract<AnyEvent, { type: "chat.message" }>;
             setState((s) => {
@@ -250,5 +284,12 @@ export function useEvents(enabled: boolean) {
   }, [enabled, refresh, refreshAccounts]);
 
 
-  return { ...state, refresh, refreshAccounts };
+  const trackOutgoing = useCallback((incoming: Outgoing) => {
+    const buffered = pendingOutgoingRef.current.get(incoming.id) ?? [];
+    pendingOutgoingRef.current.delete(incoming.id);
+    const o = buffered.reduce(applyOutgoingEvent, incoming);
+    setState((s) => ({ ...s, outgoing: [...s.outgoing.filter((x) => x.id !== o.id), o].slice(-50) }));
+  }, []);
+
+  return { ...state, refresh, refreshAccounts, trackOutgoing };
 }

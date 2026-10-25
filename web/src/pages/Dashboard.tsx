@@ -18,7 +18,7 @@ function initialTab(): Tab {
 }
 
 export function Dashboard({ username, onLogout }: { username: string; onLogout: () => void }) {
-  const { destinations, relay, accounts, chat, conn, error, refresh, refreshAccounts } = useEvents(true);
+  const { destinations, relay, accounts, chat, outgoing, conn, error, refresh, refreshAccounts, trackOutgoing } = useEvents(true);
   const [tab, setTab] = useState<Tab>(initialTab);
   const [editing, setEditing] = useState<Destination | null | "new">(null);
   const [busyIds, setBusyIds] = useState<Set<number>>(new Set());
@@ -123,7 +123,7 @@ export function Dashboard({ username, onLogout }: { username: string; onLogout: 
         ))}
       </nav>
 
-      {tab === "chat" && <ChatPane live={chat} accounts={accounts} />}
+      {tab === "chat" && <ChatPane live={chat} accounts={accounts} outgoing={outgoing} onSent={trackOutgoing} />}
       {tab === "accounts" && <AccountsPane accounts={accounts} onChanged={refreshAccounts} flash={flash} />}
 
       {tab === "stream" && <IngestPanel relay={relay} busy={relayBusy} onToggleRelay={(e) => void onToggleRelay(e)} />}

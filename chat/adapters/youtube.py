@@ -338,7 +338,7 @@ class YouTubeAdapter:
                             msg_ = "youtube chat ended"
                             raise NotLiveError(msg_)
 
-    async def send(self, text: str) -> SendResult:
+    async def send(self, text: str, *, reply_to: str | None = None) -> SendResult:
         if not self.live_chat_id:
             try:
                 self.live_chat_id = await self._find_live_chat()

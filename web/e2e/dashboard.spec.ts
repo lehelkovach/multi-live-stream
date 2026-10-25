@@ -113,6 +113,29 @@ test("chat: add a fake account → messages stream into the unified pane", async
   await expect(page.getByTestId("chat-message").first()).toContainText("fake platform");
   await expect(page.getByTestId("chat-summary")).toContainText("1/1 connected");
 
+  // compose: broadcast to all -> delivery tick + the platform echo shows up as our own message
+  await page.getByTestId("compose-input").fill("hello from the dashboard");
+  await page.getByTestId("compose-send").click();
+  const outgoing = page.getByTestId("outgoing-row").filter({ hasText: "hello from the dashboard" });
+  await expect(outgoing).toBeVisible();
+  await expect(outgoing.getByTestId("delivery")).toHaveAttribute("data-status", "sent", { timeout: 15_000 });
+  await expect(outgoing).toHaveAttribute("data-status", "sent", { timeout: 15_000 });
+  await expect(page.locator(".msg.own").filter({ hasText: "hello from the dashboard" })).toBeVisible({ timeout: 15_000 });
+
+  // a failing send is reported per target
+  await page.getByTestId("compose-input").fill("[fail] this one bounces");
+  await page.getByTestId("compose-send").click();
+  const failed = page.getByTestId("outgoing-row").filter({ hasText: "this one bounces" });
+  await expect(failed.getByTestId("delivery")).toHaveAttribute("data-status", "failed", { timeout: 15_000 });
+  await expect(failed).toHaveAttribute("data-status", "failed", { timeout: 15_000 });
+
+  // tap-to-reply pre-selects the platform
+  await page.getByTestId("chat-message").first().click();
+  await expect(page.getByTestId("replying")).toContainText("replying to");
+  await page.getByTestId("compose-input").fill("thanks!");
+  await page.getByTestId("compose-send").click();
+  await expect(page.getByTestId("outgoing-row").filter({ hasText: "thanks!" }).getByTestId("delivery")).toHaveAttribute("data-status", "sent", { timeout: 15_000 });
+
   // messages survive a reload (history) and keep flowing
   const before = await page.getByTestId("chat-message").count();
   await page.reload();

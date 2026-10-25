@@ -33,6 +33,7 @@ from chat.base import (
     Credentials,
     NotLiveError,
 )
+from chat.outbox import Outbox
 from chat.registry import make_adapter
 from chat.store import ChatStore
 from core.crypto import DecryptError, SecretBox
@@ -42,6 +43,7 @@ from core.models import ChatAccount, ChatAccountStatus, utcnow
 from core.redis import (
     CHANNEL_EVENTS,
     EVENT_CHAT_ACCOUNTS_CHANGED,
+    EVENT_CHAT_SEND,
     EVENT_INGEST_STATE,
     KEY_INGEST_STATE,
     make_redis,
@@ -195,6 +197,7 @@ class ChatManager:
         self._box = SecretBox(settings.secret_keys)
         self.runners: dict[int, AccountRunner] = {}
         self._wake = asyncio.Event()
+        self.outbox = Outbox(self)
 
     # ---- wiring --------------------------------------------------------------
 
@@ -312,6 +315,7 @@ class ChatManager:
             await self.shutdown()
 
     async def shutdown(self) -> None:
+        await self.outbox.cancel_all()
         runners = list(self.runners.values())
         self.runners.clear()
         await asyncio.gather(*(r.stop() for r in runners), return_exceptions=True)
@@ -395,6 +399,8 @@ class ChatManager:
                     elif kind == EVENT_INGEST_STATE and event.get("live"):
                         for runner in self.runners.values():
                             runner.wake()
+                    elif kind == EVENT_CHAT_SEND and isinstance(event.get("id"), int):
+                        self.outbox.schedule(int(event["id"]))
             except asyncio.CancelledError:
                 raise
             except Exception as exc:

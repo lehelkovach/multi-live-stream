@@ -217,8 +217,42 @@ class FacebookAdapter:
                 last_live_check = time.monotonic()
             await asyncio.sleep(POLL_INTERVAL)
 
-    async def send(self, text: str) -> SendResult:
-        return SendResult(False, error="facebook: sending arrives in Phase 4")
+    async def _video_id(self) -> str:
+        """Comments are published on the LiveVideo's underlying Video object."""
+        extra = self.ctx.credentials.extra
+        if extra.get("_video_id_for") == self.live_video_id and extra.get("_video_id"):
+            return str(extra["_video_id"])
+        data = await self._get(
+            f"{self.graph_url}/{self._v}/{self.live_video_id}", {"fields": "video"}
+        )
+        video_id = str((data.get("video") or {}).get("id") or "")
+        if not video_id:
+            msg = "facebook: live video has no video object yet"
+            raise AdapterError(msg)
+        extra["_video_id"] = video_id
+        extra["_video_id_for"] = self.live_video_id
+        return video_id
+
+    async def send(self, text: str, *, reply_to: str | None = None) -> SendResult:
+        """``POST /{video-id}/comments`` with the Page token (``pages_manage_engagement``)."""
+        try:
+            if not self._token:
+                self._token = self._resolve_token()
+            if not self.live_video_id:
+                self.live_video_id = await self._find_live_video()
+            target = reply_to or await self._video_id()
+            resp = await self.ctx.http.post(
+                f"{self.graph_url}/{self._v}/{target}/comments",
+                data={"message": text[:8000], "access_token": self._token},
+                timeout=20,
+            )
+        except AdapterError as exc:
+            return SendResult(False, error=str(exc))
+        except httpx.HTTPError as exc:
+            return SendResult(False, error=f"facebook graph unreachable: {exc}")
+        if resp.status_code >= 400:
+            return SendResult(False, error=str(_graph_error(resp)))
+        return SendResult(True, message_id=str(resp.json().get("id", "")))
 
     async def close(self) -> None:
         self._stop = True

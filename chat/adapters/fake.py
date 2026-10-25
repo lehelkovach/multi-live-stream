@@ -64,7 +64,9 @@ class FakeAdapter:
         while not self._stop:  # limit reached: stay connected, only echo own messages
             yield await self._queue.get()
 
-    async def send(self, text: str) -> SendResult:
+    async def send(self, text: str, *, reply_to: str | None = None) -> SendResult:
+        if self.ctx.credentials.extra.get("fail_send") or text.startswith("[fail]"):
+            return SendResult(False, error="fake platform rejected the message")
         n = next(self._counter)
         await self._queue.put(
             ChatMessage(

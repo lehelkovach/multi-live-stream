@@ -2,6 +2,24 @@
 
 One entry per completed phase (plus notable fixes). Newest first.
 
+## Phase 4 - Replies + broadcast (2026-10-25)
+
+* `POST /api/v1/chat/send` (`targets: "all" | [ids]`, optional `reply_to`) queues an
+  `outgoing_message`; the chat service fans out concurrently with one task per
+  target, per-account token-bucket rate limits with per-platform defaults,
+  per-target timeouts, and records `sent / failed / rate_limited / offline /
+  unsupported` per target plus a `sent / partial / failed` summary. Progress is
+  broadcast as `chat.outgoing` events; `GET /api/v1/chat/outgoing` lists history.
+* Adapters gained `reply_to`: Twitch `reply_parent_message_id`, Kick
+  `reply_to_message_id`, Facebook comment-on-comment; Facebook sending implemented
+  as a Page comment on the live video's Video object.
+* Dashboard: compose bar in the Chat tab with All / per-account target chips,
+  tap-to-reply, and an outgoing row showing a tick/cross per platform with the
+  error on tap.
+* Tests: token bucket, fan-out with fake adapters (partial failure, offline
+  target, events), rate limiting, reply scoping, API validation, Playwright
+  compose flow.
+
 ## Phase 3 - Chat aggregation, read side (2026-10-25)
 
 * `chat/` package: `ChatAdapter` protocol, normalized `ChatMessage`, encrypted

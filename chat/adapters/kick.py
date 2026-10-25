@@ -178,17 +178,19 @@ class KickAdapter:
                 await pubsub.unsubscribe(CHANNEL_WEBHOOKS_KICK)
                 await pubsub.aclose()  # type: ignore[no-untyped-call]
 
-    async def send(self, text: str) -> SendResult:
+    async def send(self, text: str, *, reply_to: str | None = None) -> SendResult:
         if not self.broadcaster_user_id:
             try:
                 await self.connect()
             except AdapterError as exc:
                 return SendResult(False, error=str(exc))
-        body = {
+        body: dict[str, Any] = {
             "type": "user",
             "broadcaster_user_id": int(self.broadcaster_user_id),
             "content": text[:500],
         }
+        if reply_to:
+            body["reply_to_message_id"] = reply_to
         try:
             resp = await self._request("POST", "/chat", json=body)
         except AdapterError as exc:

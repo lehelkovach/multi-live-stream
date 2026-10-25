@@ -4,6 +4,9 @@ import type { ChatAccount, ChatPlatformInfo } from "../types";
 import { StatusPill } from "./StatusPill";
 import { Toggle } from "./Toggle";
 
+const PLATFORM_LETTER: Record<string, string> = { twitch: "TW", youtube: "YT", kick: "KI", facebook: "FB", fake: "FK" };
+const letters = (platform: string) => PLATFORM_LETTER[platform] ?? platform.slice(0, 2).toUpperCase();
+
 interface Props {
   accounts: ChatAccount[];
   onChanged: () => Promise<void>;
@@ -65,7 +68,7 @@ export function AccountsPane({ accounts, onChanged, flash }: Props) {
         <div className="connect-grid">
           {platforms.map((p) => (
             <div key={p.platform} className="connect-row">
-              <span className={`avatar avatar-${p.platform}`}>{p.label.slice(0, 2).toUpperCase()}</span>
+              <span className={`avatar avatar-${p.platform}`}>{letters(p.platform)}</span>
               <span className="connect-name">{p.label}</span>
               <span className="spacer" />
               {p.oauth_configured && (
@@ -86,7 +89,7 @@ export function AccountsPane({ accounts, onChanged, flash }: Props) {
       {accounts.map((acc) => (
         <article key={acc.id} className="card account" data-testid="chat-account">
           <div className="dest-head">
-            <span className={`avatar avatar-${acc.platform}`}>{acc.platform.slice(0, 2).toUpperCase()}</span>
+            <span className={`avatar avatar-${acc.platform}`}>{letters(acc.platform)}</span>
             <div className="dest-title">
               <div className="dest-name">{acc.display_name || acc.platform}</div>
               <div className="muted small">

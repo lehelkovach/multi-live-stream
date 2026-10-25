@@ -20,7 +20,10 @@ from api.schemas import (
     ChatAccountUpdate,
     ChatMessageOut,
     ChatPlatformInfo,
+    DeliveryOut,
     OAuthStartOut,
+    OutgoingOut,
+    SendRequest,
 )
 from api.services.chat import (
     account_out,
@@ -33,11 +36,19 @@ from chat import kick_webhook, oauth
 from chat.base import AuthError, ConfigError, Credentials
 from core.events import publish_event
 from core.logging import get_logger
-from core.models import ChatAccount, ChatPlatform, utcnow
+from core.models import (
+    ChatAccount,
+    ChatPlatform,
+    DeliveryStatus,
+    OutgoingMessage,
+    OutgoingStatus,
+    utcnow,
+)
 from core.models import ChatMessage as ChatMessageRow
 from core.redis import (
     CHANNEL_WEBHOOKS_KICK,
     EVENT_CHAT_ACCOUNTS_CHANGED,
+    EVENT_CHAT_SEND,
     KEY_OAUTH_STATE,
     KEY_WEBHOOK_SEEN,
 )
@@ -214,6 +225,104 @@ async def messages(
     rows = list(session.exec(stmt).all())
     rows.reverse()
     return [message_out(r) for r in rows]
+
+
+# ---- replies / broadcast --------------------------------------------------------
+
+
+def _outgoing_out(row: OutgoingMessage) -> OutgoingOut:
+    assert row.id is not None
+    deliveries = []
+    for key, entry in sorted(row.per_target_status.items(), key=lambda kv: int(kv[0])):
+        deliveries.append(
+            DeliveryOut(
+                account_id=int(key),
+                platform=str(entry.get("platform", "?")),
+                name=str(entry.get("name", "")),
+                status=str(entry.get("status", DeliveryStatus.PENDING)),
+                error=entry.get("error"),
+                message_id=entry.get("message_id"),
+                at=entry.get("at"),
+            )
+        )
+    return OutgoingOut(
+        id=row.id,
+        text=row.text,
+        targets=list(row.targets),
+        status=row.status,
+        reply_to=row.reply_to,
+        deliveries=deliveries,
+        created_at=row.created_at,
+        finished_at=row.finished_at,
+    )
+
+
+@protected.post("/send", response_model=OutgoingOut, status_code=status.HTTP_202_ACCEPTED)
+async def send_message(body: SendRequest, session: DbDep, redis: RedisDep) -> OutgoingOut:
+    """Queue ``text`` for one, several or all enabled chat accounts. Delivery is
+    asynchronous: watch ``chat.outgoing`` events or poll ``GET /chat/outgoing``."""
+    enabled = {
+        a.id: a
+        for a in session.exec(select(ChatAccount).where(col(ChatAccount.enabled))).all()
+        if a.id
+    }
+    if body.targets == "all":
+        chosen = list(enabled.values())
+        targets = ["all"]
+    else:
+        missing = [t for t in body.targets if t not in enabled]
+        if missing:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=f"unknown or disabled chat accounts: {missing}",
+            )
+        chosen = [enabled[t] for t in dict.fromkeys(body.targets)]
+        targets = [str(t) for t in dict.fromkeys(body.targets)]
+    if not chosen:
+        raise HTTPException(status.HTTP_409_CONFLICT, detail="no enabled chat accounts to send to")
+    per_target = {
+        str(a.id): {
+            "status": DeliveryStatus.PENDING,
+            "platform": a.platform,
+            "name": a.display_name,
+            "error": None,
+            "message_id": None,
+            "at": None,
+        }
+        for a in chosen
+    }
+    row = OutgoingMessage(
+        text=body.text.strip(),
+        targets=targets,
+        per_target_status=per_target,
+        reply_to=body.reply_to,
+        status=OutgoingStatus.PENDING,
+    )
+    session.add(row)
+    session.commit()
+    session.refresh(row)
+    log.info("chat.send_queued", id=row.id, targets=targets)
+    await publish_event(redis, EVENT_CHAT_SEND, id=row.id)
+    return _outgoing_out(row)
+
+
+@protected.get("/outgoing", response_model=list[OutgoingOut])
+async def outgoing(
+    session: DbDep, limit: Annotated[int, Query(ge=1, le=200)] = 20
+) -> list[OutgoingOut]:
+    """Most recent outgoing messages with per-target delivery status (newest first)."""
+    rows = session.exec(
+        select(OutgoingMessage).order_by(col(OutgoingMessage.id).desc()).limit(limit)
+    ).all()
+    return [_outgoing_out(r) for r in rows]
+
+
+@protected.get("/outgoing/{outgoing_id}", response_model=OutgoingOut)
+async def outgoing_one(outgoing_id: int, session: DbDep) -> OutgoingOut:
+    row = session.get(OutgoingMessage, outgoing_id)
+    if row is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="not found")
+    return _outgoing_out(row)
 
 
 # ---- OAuth --------------------------------------------------------------------

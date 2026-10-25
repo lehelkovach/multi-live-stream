@@ -202,3 +202,55 @@ def test_delete_account_keeps_history(chat_client: TestClient) -> None:
     msgs = chat_client.get("/api/v1/chat/messages").json()
     assert [m["id"] for m in msgs] == ["fake:keep"]
     assert msgs[0]["account_id"] is None
+
+
+def test_send_endpoint_queues_and_validates(
+    chat_client: TestClient, redis_sync: fakeredis.FakeRedis
+) -> None:
+    assert (
+        chat_client.post("/api/v1/chat/send", json={"text": "hi"}).status_code == 409
+    )  # nothing enabled
+    a = chat_client.post(ACC, json={"platform": "fake", "display_name": "A"}).json()
+    b = chat_client.post(
+        ACC, json={"platform": "fake", "display_name": "B", "enabled": False}
+    ).json()
+    sub = redis_sync.pubsub()
+    sub.subscribe("omni:events")
+    sub.get_message(timeout=0.1)
+
+    r = chat_client.post("/api/v1/chat/send", json={"text": " hello ", "targets": "all"})
+    assert r.status_code == 202, r.text
+    out = r.json()
+    assert out["status"] == "pending"
+    assert out["targets"] == ["all"]
+    assert out["text"] == "hello"
+    assert [d["account_id"] for d in out["deliveries"]] == [a["id"]]  # disabled B excluded
+    events = []
+    while (m := sub.get_message(timeout=0.2)) is not None:
+        if m["type"] == "message":
+            events.append(json.loads(m["data"]))
+    assert any(e["type"] == "chat.send" and e["id"] == out["id"] for e in events)
+
+    assert (
+        chat_client.post("/api/v1/chat/send", json={"text": "x", "targets": [b["id"]]}).status_code
+        == 422
+    )
+    assert (
+        chat_client.post("/api/v1/chat/send", json={"text": "x", "targets": [999]}).status_code
+        == 422
+    )
+    assert chat_client.post("/api/v1/chat/send", json={"text": ""}).status_code == 422
+    assert chat_client.post("/api/v1/chat/send", json={"text": "y" * 501}).status_code == 422
+
+    r = chat_client.post(
+        "/api/v1/chat/send", json={"text": "reply", "targets": [a["id"]], "reply_to": "fake:1-1"}
+    )
+    assert r.status_code == 202
+    assert r.json()["reply_to"] == "fake:1-1"
+    assert r.json()["targets"] == [str(a["id"])]
+
+    listed = chat_client.get("/api/v1/chat/outgoing").json()
+    assert [o["text"] for o in listed] == ["reply", "hello"]
+    assert chat_client.get(f"/api/v1/chat/outgoing/{out['id']}").json()["id"] == out["id"]
+    assert chat_client.get("/api/v1/chat/outgoing/999").status_code == 404
+    assert chat_client.get("/api/v1/chat/send").status_code == 405

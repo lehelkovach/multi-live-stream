@@ -145,13 +145,34 @@ class ChatMessage(SQLModel, table=True):
     raw: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON, nullable=True))
 
 
+class OutgoingStatus(StrEnum):
+    PENDING = "pending"
+    SENT = "sent"  # every target accepted it
+    PARTIAL = "partial"  # some targets failed
+    FAILED = "failed"  # no target accepted it
+
+
+class DeliveryStatus(StrEnum):
+    PENDING = "pending"
+    SENT = "sent"
+    FAILED = "failed"
+    RATE_LIMITED = "rate_limited"
+    OFFLINE = "offline"  # account not connected right now
+    UNSUPPORTED = "unsupported"  # platform cannot post
+
+
 class OutgoingMessage(SQLModel, table=True):
     __tablename__ = "outgoing_message"
 
     id: int | None = Field(default=None, primary_key=True)
     text: str
+    # ["all"] or chat account ids as strings
     targets: list[str] = Field(default_factory=list, sa_column=Column(JSON, nullable=False))
+    # {"<account id>": {"status", "error", "message_id", "platform", "name", "at"}}
     per_target_status: dict[str, Any] = Field(
         default_factory=dict, sa_column=Column(JSON, nullable=False)
     )
+    status: str = Field(default=OutgoingStatus.PENDING, max_length=16)
+    reply_to: str | None = Field(default=None, max_length=200)  # chat_message id being answered
     created_at: datetime = Field(default_factory=utcnow, index=True)
+    finished_at: datetime | None = None

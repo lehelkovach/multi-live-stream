@@ -273,3 +273,30 @@ class ChatPlatformInfo(BaseModel):
 
 class OAuthStartOut(BaseModel):
     url: str
+
+
+class SendRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=500)
+    targets: list[int] | Literal["all"] = "all"
+    reply_to: str | None = Field(default=None, max_length=200)
+
+
+class DeliveryOut(BaseModel):
+    account_id: int
+    platform: str
+    name: str
+    status: str
+    error: str | None = None
+    message_id: str | None = None
+    at: float | None = None
+
+
+class OutgoingOut(BaseModel):
+    id: int
+    text: str
+    targets: list[str]
+    status: str
+    reply_to: str | None
+    deliveries: list[DeliveryOut]
+    created_at: datetime
+    finished_at: datetime | None

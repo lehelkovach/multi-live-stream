@@ -80,6 +80,20 @@ class Settings(BaseSettings):
     youtube_daily_quota: int = 10_000  # units/day granted to the Google project
     youtube_chat_quota_share: float = 0.8  # fraction of the daily quota chat polling may use
     youtube_stream_mode: bool = False  # experimental: liveChatMessages.streamList
+    # Outgoing chat rate limits per platform: sustained messages/second and burst size.
+    # Conservative defaults from the platform docs (see docs/platforms.md); JSON in .env.
+    chat_rate_limits: dict[str, float] = {
+        "twitch": 1.0, "youtube": 0.34, "kick": 1.0, "facebook": 0.2, "fake": 20.0
+    }  # fmt: skip
+    chat_rate_burst: dict[str, int] = {
+        "twitch": 5,
+        "youtube": 1,
+        "kick": 3,
+        "facebook": 1,
+        "fake": 20,
+    }
+    chat_send_max_wait: float = 10.0  # seconds a send may wait for a rate-limit slot
+    chat_send_timeout: float = 20.0  # seconds per platform call
 
     # --- misc --------------------------------------------------------------
     log_level: str = "info"
