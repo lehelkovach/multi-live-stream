@@ -41,6 +41,15 @@ If you set `OMNI_DOMAIN` to a real DNS name Caddy obtains a Let's Encrypt
 certificate automatically. With `localhost` or a bare IP it issues a self-signed
 certificate (expect a browser warning / use `curl -k`).
 
+## What works today (Phase 1)
+
+* Ingest with a secret stream key (RTMP + SRT), rejected otherwise.
+* Destinations via the API (`/api/docs`): add/edit/toggle, stream keys encrypted at rest.
+* Relay: one supervised `ffmpeg -c copy` per enabled destination, auto-restart with
+  backoff, per-destination status/bitrate/last error, global start/stop.
+* The dashboard UI arrives in Phase 2; until then use `/api/docs` after logging in via
+  `POST /api/v1/auth/login`.
+
 ## Day-to-day
 
 | Command              | What it does                                              |

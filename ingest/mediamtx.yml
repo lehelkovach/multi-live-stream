@@ -40,6 +40,7 @@ srtAddress: :8890
 
 hls: no
 webrtc: no
+moq: no                   # (1.21+) not needed; avoids a TLS cert being generated on :8892
 
 # ---- paths -----------------------------------------------------------------
 pathDefaults:

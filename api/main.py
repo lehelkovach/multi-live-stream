@@ -19,7 +19,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from api.auth import LoginRateLimiter, PasswordVerifier, SessionSigner
-from api.routers import auth, health
+from api.routers import auth, destinations, health, ingest, relay
 from core import __version__
 from core.crypto import SecretBox
 from core.db import init_db, make_engine
@@ -64,6 +64,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     app.include_router(health.router)
     app.include_router(auth.router)
+    app.include_router(ingest.router)
+    app.include_router(destinations.router)
+    app.include_router(relay.router)
     _mount_web(app, Path(settings.web_dist_dir))
     return app
 

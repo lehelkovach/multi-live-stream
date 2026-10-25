@@ -33,6 +33,7 @@ class Platform(StrEnum):
 class Profile(StrEnum):
     COPY = "copy"  # -c copy, never re-encode (default)
     VERTICAL_720P = "vertical_720p"  # crop centre to 9:16 and scale to 720x1280
+    CUSTOM = "custom"  # operator-supplied ffmpeg output args (see Destination.ffmpeg_args)
 
 
 class DestinationStatus(StrEnum):
@@ -54,10 +55,31 @@ class Destination(SQLModel, table=True):
     stream_key_encrypted: str = Field(default="")
     enabled: bool = Field(default=True, index=True)
     profile: str = Field(default=Profile.COPY, max_length=32)
+    # Only used when profile == "custom": ffmpeg output options placed between the
+    # input and the output URL (e.g. "-c:v libx264 -b:v 3000k -c:a copy").
+    ffmpeg_args: str | None = Field(default=None, max_length=2000)
     status: str = Field(default=DestinationStatus.IDLE, max_length=32)
     last_error: str | None = Field(default=None, max_length=2000)
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
+
+    def output_url(self, stream_key: str) -> str:
+        """``rtmp_url`` + ``/`` + key, tolerating a trailing slash on the server URL."""
+        base = self.rtmp_url.rstrip("/")
+        return f"{base}/{stream_key}" if stream_key else base
+
+
+class AppSetting(SQLModel, table=True):
+    """Tiny key/value table for global switches (e.g. ``relay.enabled``)."""
+
+    __tablename__ = "app_setting"
+
+    key: str = Field(primary_key=True, max_length=100)
+    value: str = Field(default="", max_length=2000)
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
+SETTING_RELAY_ENABLED = "relay.enabled"
 
 
 class ChatAccount(SQLModel, table=True):

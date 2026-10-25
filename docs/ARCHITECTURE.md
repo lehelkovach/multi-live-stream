@@ -1,6 +1,6 @@
 # OmniStream architecture
 
-Status: Phase 0 (skeleton) complete. This document is updated at the start of
+Status: Phase 1 (relay) complete. This document is updated at the start of
 each phase with the plan for that phase, and at the end with what was actually
 built.
 
@@ -94,17 +94,70 @@ platform never needs a migration.
   `omnistream rotate-keys`).
 * **No secrets in git.** `.env` is ignored; `scripts/init_env.py` generates one.
 
-## Data flow (Phase 1 preview)
+## Relay (Phase 1)
 
-1. OBS publishes to `rtmp://host/live/<key>`; MediaMTX asks the API; API says 200.
-2. The relay polls the MediaMTX API every couple of seconds (`/v3/paths/list`) and
-   the DB for enabled destinations, and reconciles: start an ffmpeg
-   `-i rtsp://mediamtx:8554/live/<key> -c copy -f flv rtmp://platform/key` per
-   destination, stop ones that were disabled, restart crashed ones with
-   exponential backoff.
-3. Per-destination status (`starting|live|retrying|error`, last error, bitrate,
-   uptime) is written to Redis and published on `omni:events`; the API fans it out
-   to dashboard WebSockets and persists `status`/`last_error` on the row.
+### Data flow
+
+1. OBS publishes to `rtmp://host:1935/live/<key>` (or SRT). MediaMTX POSTs the
+   request to `api:/internal/mediamtx/auth`; the API compares the path against
+   `live/<OMNI_INGEST_STREAM_KEY>` in constant time and answers 200/401. On 200 it
+   also publishes `ingest.publish` so the relay reacts without waiting for a poll.
+2. `python -m relay` (`relay/supervisor.py`) runs a reconcile loop every
+   `OMNI_RELAY_POLL_INTERVAL` (2 s) or immediately on a Redis event
+   (`destinations.changed`, `relay.changed`, `ingest.publish`). Each pass:
+   * asks MediaMTX (`/v3/paths/list`) whether `live/<key>` is ready,
+   * loads the global switch (`app_setting.relay.enabled`) and all destinations,
+   * computes the desired set: every enabled destination, if the input is live and
+     the switch is on. For each it builds the ffmpeg argv (`relay/ffmpeg.py`),
+   * stops workers that are no longer desired or whose argv changed (key/URL/profile
+     edits restart just that output), starts missing ones,
+   * writes a status blob per destination to Redis (TTL 30 s) and the ingest
+     state, and bumps the heartbeat.
+3. A `DestinationWorker` (`relay/worker.py`) owns one ffmpeg process:
+   `-rtsp_transport tcp -timeout 10s -i rtsp://mediamtx:8554/live/<key>` then the
+   profile args then `-f flv rtmp://platform/app/key`. It parses `-progress pipe:1`
+   for bytes/bitrate, flips `starting -> live` on the first output bytes, keeps the
+   last 30 stderr lines for `last_error`, kills the process if no progress arrives
+   for `OMNI_RELAY_STALL_TIMEOUT` (20 s), and restarts on exit with exponential
+   backoff (1 s, 2 s, 4 s ... capped at 60 s, +20% jitter). After
+   `OMNI_RELAY_ERROR_AFTER_FAILURES` (5) consecutive quick failures the status is
+   `error` but it keeps retrying at the cap; a run longer than
+   `OMNI_RELAY_HEALTHY_AFTER` (30 s) resets the counter. Children get
+   `PR_SET_PDEATHSIG`, so a crashed relay can never leave an orphan ffmpeg pushing
+   while its replacement starts another.
+4. The API merges the DB row with the Redis blob (`GET /api/v1/destinations`),
+   exposes the global switch and ingest state (`/api/v1/relay`), and the OBS
+   settings (`/api/v1/relay/ingest`). Status changes also persist to
+   `destination.status` / `last_error` so history survives a Redis restart.
+
+### Isolation guarantees
+
+* One asyncio task + one OS process (own session) per destination; a worker
+  failure only touches its own status blob.
+* The supervisor never awaits a worker inside the reconcile pass other than
+  `stop()` (bounded by a 5 s grace + SIGKILL).
+* Ingest is a different process (MediaMTX) and never depends on the relay.
+* Verified by `tests/integration/test_relay_e2e.py` (real MediaMTX + ffmpeg): SIGKILL
+  of one output's ffmpeg leaves the other output's byte counter rising, and the
+  killed one is back within seconds with `restarts == 1`.
+
+### Profiles
+
+| profile         | what ffmpeg does |
+|-----------------|------------------|
+| `copy` (default)| `-c copy`; zero CPU; needs H.264 + AAC from OBS for RTMP targets |
+| `vertical_720p` | centre crop to 9:16, scale 720x1280, libx264 veryfast 2.5 Mbps, 2 s keyframes, AAC 128k |
+| `custom`        | operator supplied output args (`Destination.ffmpeg_args`) |
+
+Output container is chosen from the URL: `rtmp(s)://` -> FLV, `srt://` / `udp://`
+-> MPEG-TS.
+
+### Status model
+
+`disabled` (enabled=false) · `idle` (enabled, waiting; `detail` says why: no input
+stream / relay stopped) · `starting` · `live` · `retrying` (with `next_retry_at`) ·
+`error` (many failures, still retrying, or invalid config such as an undecryptable
+key).
 
 ## Local development & tests
 

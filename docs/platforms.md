@@ -18,6 +18,13 @@ against current docs; nothing here is a guess.
 Stream copy (`-c copy`) is used for every row; make OBS output H.264 + AAC, which
 all of the above accept. `vertical_720p` re-encodes (opt-in per destination).
 
+Verified in Phase 1 against two local MediaMTX "fake platforms" (RTMP). RTMPS and
+SRT outputs rely on the Debian `ffmpeg` build in the image (OpenSSL/GnuTLS + libsrt
+are compiled in); first real-platform runs should be checked with `make logs S=relay`.
+
+Keyframe interval: YouTube/Twitch/Facebook want a keyframe every 2 s (Kick/X are
+fine with it too). Set OBS to a 2 s keyframe interval; `copy` cannot change it.
+
 ## Chat APIs
 
 Filled in during Phase 3/4.

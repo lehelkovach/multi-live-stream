@@ -2,6 +2,26 @@
 
 One entry per completed phase (plus notable fixes). Newest first.
 
+## Phase 1 - Relay (2026-10-25)
+
+* Ingest auth: MediaMTX HTTP hook (`/internal/mediamtx/auth`) accepts publishes only
+  on `live/<OMNI_INGEST_STREAM_KEY>` (constant-time compare, per-IP rate limit) and
+  reads only from internal networks. Blocked at the Caddy edge.
+* Destinations API (`/api/v1/destinations`): CRUD with Fernet-encrypted stream keys,
+  masked in responses, validation of URLs/platforms/profiles, change events to Redis.
+* Relay supervisor (`python -m relay`, new `relay` Compose service): reconcile loop
+  (poll + Redis wake-ups), one supervised ffmpeg per enabled destination,
+  exponential backoff with jitter, stall watchdog, PDEATHSIG, per-destination
+  status/bitrate/uptime/last_error in Redis + DB, heartbeat + `--healthcheck`.
+* Profiles: `copy` (default, never re-encodes), `vertical_720p`, `custom`.
+* Global start/stop switch + ingest state + OBS settings (`/api/v1/relay`).
+* Tests: 70+ unit tests (worker against a fake ffmpeg, supervisor against fake
+  MediaMTX/workers, API) and an end-to-end integration test with real MediaMTX,
+  ffmpeg and redis-server proving fan-out to two fake destinations, failure
+  isolation (SIGKILL one output, the other keeps flowing), wrong-key rejection,
+  toggles and the global switch. CI runs it.
+* MediaMTX config: `moq: no` (1.21 default listener + cert generation not needed).
+
 ## Phase 0 - Skeleton (2026-10-25)
 
 * Compose stack: Caddy (auto-HTTPS edge), web (Vite/React static build), api

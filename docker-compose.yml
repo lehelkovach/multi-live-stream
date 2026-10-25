@@ -53,6 +53,32 @@ services:
       redis:
         condition: service_healthy
 
+  # ---- relay: one supervised ffmpeg per destination ------------------------
+  relay:
+    image: omnistream-app:local
+    restart: unless-stopped
+    command: ["python", "-m", "relay"]
+    env_file:
+      - path: .env
+        required: true
+    environment:
+      <<: *app-env
+    volumes:
+      - app_data:/data
+    depends_on:
+      api:
+        condition: service_started
+      redis:
+        condition: service_healthy
+      mediamtx:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "python", "-m", "relay", "--healthcheck"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
   # ---- state / pub-sub -----------------------------------------------------
   redis:
     image: redis:7-alpine
