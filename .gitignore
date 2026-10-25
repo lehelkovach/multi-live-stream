@@ -20,6 +20,7 @@ htmlcov/
 web/node_modules/
 web/dist/
 web/playwright-report/
+web/blob-report/
 web/test-results/
 node_modules/
 
@@ -39,3 +40,8 @@ data/
 auto.crt
 auto.key
 *.pem
+
+# playwright outputs (any location)
+test-results/
+playwright-report/
+blob-report/

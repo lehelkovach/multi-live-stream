@@ -2,6 +2,19 @@
 
 One entry per completed phase (plus notable fixes). Newest first.
 
+## Phase 2 - Dashboard (2026-10-25)
+
+* Mobile-first React dashboard: login, destination cards (status pill, bitrate,
+  uptime, restarts, last error), add/edit bottom sheet with platform presets,
+  enable toggles, delete, Start all / Stop all, input panel with OBS settings.
+* `GET /ws/events` WebSocket: snapshot on connect, then relay/API events forwarded
+  from Redis; client reconnects with backoff and re-syncs from REST.
+* Shared read models (`api/services/state.py`) used by REST and WebSocket.
+* `init_db` tolerates the api/relay start-up race on a fresh SQLite file.
+* Playwright smoke test (`make test-e2e`, CI job `e2e`) against a harness that runs
+  the real relay supervisor with a fake ingest: login -> add destination -> toggle
+  -> live status pushed over the WebSocket, plus edit/delete/sign-out.
+
 ## Phase 1 - Relay (2026-10-25)
 
 * Ingest auth: MediaMTX HTTP hook (`/internal/mediamtx/auth`) accepts publishes only

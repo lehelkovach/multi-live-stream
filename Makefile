@@ -9,7 +9,7 @@ UV      ?= uv
 NPM     ?= npm --prefix web
 S       ?=            # service name for logs/restart, e.g. make logs S=api
 
-.PHONY: help init-env up down restart build ps logs venv test test-integration lint fmt \
+.PHONY: help init-env up down restart build ps logs venv test test-integration test-e2e lint fmt \
         web-install web-build web-lint secret hash-password check-config compose-config \
         dev-api dev-web clean
 
@@ -53,6 +53,9 @@ test: venv ## unit tests
 
 test-integration: venv ## integration tests (need mediamtx, ffmpeg, redis-server)
 	$(UV) run pytest -q -m integration
+
+test-e2e: venv web-build ## Playwright dashboard smoke test (needs redis-server + chromium)
+	cd web && npx playwright test
 
 lint: venv web/node_modules/.package-lock.json ## ruff + mypy + tsc
 	$(UV) run ruff check .

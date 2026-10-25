@@ -1,6 +1,6 @@
 # OmniStream architecture
 
-Status: Phase 1 (relay) complete. This document is updated at the start of
+Status: Phase 2 (dashboard) complete. This document is updated at the start of
 each phase with the plan for that phase, and at the end with what was actually
 built.
 
@@ -159,12 +159,53 @@ stream / relay stopped) · `starting` · `live` · `retrying` (with `next_retry_
 `error` (many failures, still retrying, or invalid config such as an undecryptable
 key).
 
+## Dashboard (Phase 2)
+
+Vite + React 19 + TypeScript, no UI framework, plain CSS. One screen, built for a
+phone: a sticky header (live-updates badge, sign out), an **input/relay panel**
+(ingest live/offline + bitrate + uptime, Start all / Stop all, collapsible OBS
+settings with copy buttons) and the **destination list**. Each card shows the
+platform avatar, name, host, masked key, a status pill, bitrate/uptime/restarts
+while live or the last error while failing, an enable toggle, Edit and Delete.
+Add/Edit is a bottom sheet with platform presets that pre-fill the server URL.
+
+### Live updates
+
+`GET /ws/events` (cookie-authenticated; closes with 4401 otherwise) sends a
+`snapshot` (destinations + relay state) on connect and then forwards every JSON
+event from the Redis `omni:events` channel verbatim:
+
+| event                 | producer | dashboard reaction |
+|-----------------------|----------|--------------------|
+| `destination.status`  | relay    | merge runtime + status into the card (status change) |
+| `destination.stats`   | relay    | merge runtime (bitrate/uptime), ~every 2 s per live output |
+| `ingest.state`        | relay    | update the input panel |
+| `destinations.changed`| api      | re-fetch the destination list (REST) |
+| `relay.changed`       | api      | re-fetch relay state (REST) |
+
+The client (`web/src/hooks/useEvents.ts`) reconnects with backoff (1 s ... 10 s),
+re-syncs from REST after each connect and every 30 s, and answers `pong` pings.
+A disabled destination always renders `disabled` even if a stale runtime blob
+says otherwise.
+
+### Smoke test
+
+`make test-e2e` builds the dashboard and runs `web/e2e/dashboard.spec.ts` with
+Playwright (Pixel 7 emulation) against `tests/e2e/serve.py`: redis-server + the
+API serving `web/dist` + the **real** relay supervisor wired to a fake MediaMTX
+and fake workers (`/__test/ingest/on|off` flips the fake input). The test covers
+wrong password, login, add (with platform preset), validation error, toggle
+off/on, input going live -> card live with bitrate pushed over the WebSocket,
+Stop all / Start all, input offline -> idle, edit keeping the key, OBS settings,
+reload keeping the session, delete, sign out.
+
 ## Local development & tests
 
 * `make test` runs unit tests with a temp SQLite file and `fakeredis`; no Docker needed.
 * `make test-integration` (Phase 1+) spins up a real `mediamtx` binary, `redis-server`
   and `ffmpeg` test patterns on random ports; skipped automatically when the
   binaries are missing.
+* `make test-e2e` runs the Playwright smoke test (needs `redis-server` + Chromium).
 * `make lint` = ruff (lint + format) + mypy `--strict` on everything + `tsc` for the web.
 * CI (`.github/workflows/ci.yml`) runs lint/tests, the integration suite, validates
   the Compose file, and builds both images for **linux/arm64** under QEMU so an

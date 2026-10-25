@@ -41,14 +41,15 @@ If you set `OMNI_DOMAIN` to a real DNS name Caddy obtains a Let's Encrypt
 certificate automatically. With `localhost` or a bare IP it issues a self-signed
 certificate (expect a browser warning / use `curl -k`).
 
-## What works today (Phase 1)
+## What works today (Phase 2)
 
 * Ingest with a secret stream key (RTMP + SRT), rejected otherwise.
-* Destinations via the API (`/api/docs`): add/edit/toggle, stream keys encrypted at rest.
 * Relay: one supervised `ffmpeg -c copy` per enabled destination, auto-restart with
   backoff, per-destination status/bitrate/last error, global start/stop.
-* The dashboard UI arrives in Phase 2; until then use `/api/docs` after logging in via
-  `POST /api/v1/auth/login`.
+* Mobile-first dashboard at `https://<domain>/`: login, add/edit/toggle destinations
+  (platform presets for YouTube/Twitch/Facebook/Kick/X), live status over a
+  WebSocket, OBS settings with copy buttons. API docs at `/api/docs`.
+* Not yet: chat (Phase 3/4), mobile apps (Phase 5), metrics/backups (Phase 6).
 
 ## Day-to-day
 
@@ -59,6 +60,7 @@ certificate (expect a browser warning / use `curl -k`).
 | `make logs S=api`    | follow logs (all services when `S` is omitted)            |
 | `make ps`            | service status + health                                   |
 | `make test`          | Python unit tests (`make test-integration` needs binaries)|
+| `make test-e2e`      | Playwright dashboard smoke test (redis-server + Chromium)|
 | `make lint`          | ruff + mypy (strict) + TypeScript type-check              |
 | `make secret`        | print a random key for `.env`                             |
 | `make hash-password` | print an argon2 hash for `OMNI_ADMIN_PASSWORD_HASH`       |

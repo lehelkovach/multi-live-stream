@@ -5,20 +5,9 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 
 from api.deps import DbDep, RedisDep, SecretBoxDep, current_user
-from api.schemas import (
-    DestinationCreate,
-    DestinationOut,
-    DestinationRuntime,
-    DestinationUpdate,
-)
-from api.services.destinations import (
-    effective_status,
-    get_stream_key,
-    list_destinations,
-    load_runtime,
-    mask_key,
-    set_stream_key,
-)
+from api.schemas import DestinationCreate, DestinationOut, DestinationUpdate
+from api.services.destinations import load_runtime, set_stream_key
+from api.services.state import destination_out, destinations_view
 from core.events import publish_event
 from core.logging import get_logger
 from core.models import Destination, utcnow
@@ -30,28 +19,6 @@ router = APIRouter(
 log = get_logger(__name__)
 
 
-def _to_out(
-    dest: Destination, box: SecretBoxDep, runtime: dict[str, object] | None
-) -> DestinationOut:
-    assert dest.id is not None
-    rt = DestinationRuntime.model_validate(runtime) if runtime else None
-    return DestinationOut(
-        id=dest.id,
-        name=dest.name,
-        platform=dest.platform,  # stored as str, validated on write
-        rtmp_url=dest.rtmp_url,
-        enabled=dest.enabled,
-        profile=dest.profile,
-        ffmpeg_args=dest.ffmpeg_args,
-        stream_key_masked=mask_key(get_stream_key(dest, box)),
-        status=effective_status(dest, runtime),
-        last_error=(rt.last_error if rt else None) or dest.last_error,
-        runtime=rt,
-        created_at=dest.created_at,
-        updated_at=dest.updated_at,
-    )
-
-
 def _get_or_404(session: DbDep, dest_id: int) -> Destination:
     dest = session.get(Destination, dest_id)
     if dest is None:
@@ -61,9 +28,7 @@ def _get_or_404(session: DbDep, dest_id: int) -> Destination:
 
 @router.get("", response_model=list[DestinationOut])
 async def list_all(session: DbDep, redis: RedisDep, box: SecretBoxDep) -> list[DestinationOut]:
-    rows = list_destinations(session)
-    runtime = await load_runtime(redis, [r.id for r in rows if r.id is not None])
-    return [_to_out(r, box, runtime.get(r.id or -1)) for r in rows]
+    return await destinations_view(session, redis, box)
 
 
 @router.post("", response_model=DestinationOut, status_code=status.HTTP_201_CREATED)
@@ -84,7 +49,7 @@ async def create(
     session.refresh(dest)
     log.info("destination.created", id=dest.id, name=dest.name, platform=dest.platform)
     await publish_event(redis, EVENT_DESTINATIONS_CHANGED, id=dest.id, op="create")
-    return _to_out(dest, box, None)
+    return destination_out(dest, box, None)
 
 
 @router.get("/{dest_id}", response_model=DestinationOut)
@@ -93,7 +58,7 @@ async def get_one(
 ) -> DestinationOut:
     dest = _get_or_404(session, dest_id)
     runtime = await load_runtime(redis, [dest_id])
-    return _to_out(dest, box, runtime.get(dest_id))
+    return destination_out(dest, box, runtime.get(dest_id))
 
 
 @router.patch("/{dest_id}", response_model=DestinationOut)
@@ -126,7 +91,7 @@ async def update(
     )
     await publish_event(redis, EVENT_DESTINATIONS_CHANGED, id=dest.id, op="update")
     runtime = await load_runtime(redis, [dest_id])
-    return _to_out(dest, box, runtime.get(dest_id))
+    return destination_out(dest, box, runtime.get(dest_id))
 
 
 @router.delete("/{dest_id}", status_code=status.HTTP_204_NO_CONTENT)

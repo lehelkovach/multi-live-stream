@@ -6,12 +6,14 @@ can share one file safely at our (low) write rate.
 
 from __future__ import annotations
 
+import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
 from sqlalchemy import Engine, event
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, SQLModel, create_engine
 
@@ -46,18 +48,32 @@ def make_engine(url: str, *, echo: bool = False) -> Engine:
         @event.listens_for(engine, "connect")
         def _set_sqlite_pragmas(dbapi_conn: Any, _record: Any) -> None:
             cur = dbapi_conn.cursor()
+            # busy_timeout first: switching to WAL needs an exclusive lock, and the
+            # api + relay processes open a fresh database at the same time.
+            cur.execute("PRAGMA busy_timeout=5000")
             cur.execute("PRAGMA journal_mode=WAL")
             cur.execute("PRAGMA synchronous=NORMAL")
-            cur.execute("PRAGMA busy_timeout=5000")
             cur.execute("PRAGMA foreign_keys=ON")
             cur.close()
 
     return engine
 
 
-def init_db(engine: Engine) -> None:
-    """Create any missing tables. (Alembic migrations are a Phase 6 item.)"""
-    SQLModel.metadata.create_all(engine)
+def init_db(engine: Engine, *, attempts: int = 5) -> None:
+    """Create any missing tables. (Alembic migrations are a Phase 6 item.)
+
+    The api and relay processes start together and share one SQLite file, so two
+    ``create_all`` calls can race on a fresh volume ("table already exists"). A
+    retry makes that harmless: the second pass only creates what is still missing.
+    """
+    for attempt in range(1, attempts + 1):
+        try:
+            SQLModel.metadata.create_all(engine)
+            return
+        except OperationalError as exc:
+            if "already exists" not in str(exc).lower() or attempt == attempts:
+                raise
+            time.sleep(0.1 * attempt)
 
 
 @contextmanager

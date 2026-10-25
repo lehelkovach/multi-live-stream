@@ -2,59 +2,25 @@
 
 from __future__ import annotations
 
-import json
-import time
 from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends
 
 from api.deps import DbDep, RedisDep, SettingsDep, current_user
-from api.schemas import IngestInfo, IngestState, OkOut, RelayState
-from api.services.destinations import effective_status, list_destinations, load_runtime
-from core.app_settings import relay_enabled, set_relay_enabled
+from api.schemas import IngestInfo, OkOut, RelayState
+from api.services.state import relay_view
+from core.app_settings import set_relay_enabled
 from core.events import publish_event
 from core.logging import get_logger
-from core.models import DestinationStatus
-from core.redis import EVENT_RELAY_CHANGED, KEY_INGEST_STATE, KEY_RELAY_HEARTBEAT
+from core.redis import EVENT_RELAY_CHANGED
 
 router = APIRouter(prefix="/api/v1/relay", tags=["relay"], dependencies=[Depends(current_user)])
 log = get_logger(__name__)
 
 
-async def _heartbeat_age(redis: RedisDep) -> float | None:
-    raw = await redis.get(KEY_RELAY_HEARTBEAT)
-    if raw is None:
-        return None
-    try:
-        return max(0.0, time.time() - float(raw))
-    except ValueError:
-        return None
-
-
-async def _ingest_state(redis: RedisDep) -> IngestState | None:
-    raw = await redis.get(KEY_INGEST_STATE)
-    if not raw:
-        return None
-    try:
-        return IngestState.model_validate(json.loads(raw))
-    except ValueError:
-        return None
-
-
 @router.get("", response_model=RelayState)
 async def state(session: DbDep, redis: RedisDep) -> RelayState:
-    rows = list_destinations(session)
-    runtime = await load_runtime(redis, [r.id for r in rows if r.id is not None])
-    statuses = [effective_status(r, runtime.get(r.id or -1)) for r in rows]
-    age = await _heartbeat_age(redis)
-    return RelayState(
-        enabled=relay_enabled(session),
-        relay_alive=age is not None and age < 15,
-        heartbeat_age_s=age,
-        ingest=await _ingest_state(redis),
-        live_count=sum(1 for s in statuses if s == DestinationStatus.LIVE),
-        enabled_count=sum(1 for r in rows if r.enabled),
-    )
+    return await relay_view(session, redis)
 
 
 @router.post("/start", response_model=OkOut)

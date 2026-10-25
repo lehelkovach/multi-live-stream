@@ -39,6 +39,29 @@ jobs:
           echo "MEDIAMTX_BIN=/tmp/mtx/mediamtx" >> "$GITHUB_ENV"
       - run: make test-integration
 
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: uv python install 3.12
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends redis-server
+      - run: make venv web-install
+      - run: cd web && npx playwright install --with-deps chromium
+      - run: make test-e2e
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: web/playwright-report
+
   compose-and-arm64-images:
     runs-on: ubuntu-latest
     steps:

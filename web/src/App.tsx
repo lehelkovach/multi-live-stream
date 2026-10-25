@@ -1,52 +1,29 @@
 import { useEffect, useState } from "react";
-import { api, type Healthz } from "./api";
+import { ApiError, auth } from "./api";
+import { Dashboard } from "./pages/Dashboard";
+import { LoginPage } from "./pages/LoginPage";
 
-type State = { kind: "loading" } | { kind: "ok"; health: Healthz } | { kind: "error"; message: string };
+type Session = { kind: "checking" } | { kind: "anonymous" } | { kind: "user"; username: string };
 
 export function App() {
-  const [state, setState] = useState<State>({ kind: "loading" });
+  const [session, setSession] = useState<Session>({ kind: "checking" });
 
   useEffect(() => {
     let cancelled = false;
-    api<Healthz>("/healthz")
-      .then((health) => !cancelled && setState({ kind: "ok", health }))
+    auth
+      .me()
+      .then((u) => !cancelled && setSession({ kind: "user", username: u.username }))
       .catch((err: unknown) => {
         if (cancelled) return;
-        setState({ kind: "error", message: err instanceof Error ? err.message : String(err) });
+        setSession({ kind: "anonymous" });
+        if (!(err instanceof ApiError && err.status === 401)) console.warn("session check failed", err);
       });
     return () => {
       cancelled = true;
     };
   }, []);
 
-  return (
-    <main className="shell">
-      <header className="topbar">
-        <span className="brand">OmniStream</span>
-        <HealthBadge state={state} />
-      </header>
-      <section className="card">
-        <h1>Phase 0: skeleton</h1>
-        <p>
-          The stack is up. Dashboard features (login, destinations, live status, chat) arrive in
-          the following phases.
-        </p>
-        {state.kind === "ok" && (
-          <p className="muted">
-            API version <code>{state.health.version}</code>
-          </p>
-        )}
-        {state.kind === "error" && <p className="error">API unreachable: {state.message}</p>}
-      </section>
-    </main>
-  );
-}
-
-function HealthBadge({ state }: { state: State }) {
-  const label = state.kind === "loading" ? "checking" : state.kind === "ok" ? "api ok" : "api down";
-  return (
-    <span className={`badge badge-${state.kind}`} data-testid="health-badge">
-      {label}
-    </span>
-  );
+  if (session.kind === "checking") return <main className="shell center muted">…</main>;
+  if (session.kind === "anonymous") return <LoginPage onLogin={(username) => setSession({ kind: "user", username })} />;
+  return <Dashboard username={session.username} onLogout={() => setSession({ kind: "anonymous" })} />;
 }
