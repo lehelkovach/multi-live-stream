@@ -34,3 +34,8 @@ data/
 .idea/
 .vscode/
 .DS_Store
+
+# MediaMTX auto-generated TLS material (if a local run ever creates it)
+auto.crt
+auto.key
+*.pem
