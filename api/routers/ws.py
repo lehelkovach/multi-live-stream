@@ -18,7 +18,7 @@ from sqlmodel import Session
 
 from api.services.state import destinations_view, relay_view
 from core.logging import get_logger
-from core.redis import CHANNEL_EVENTS
+from core.redis import CHANNEL_CHAT, CHANNEL_EVENTS
 
 router = APIRouter(tags=["ws"])
 log = get_logger(__name__)
@@ -51,7 +51,7 @@ async def events(ws: WebSocket) -> None:
     await ws.send_text(await _snapshot(ws))
 
     pubsub = ws.app.state.redis.pubsub()
-    await pubsub.subscribe(CHANNEL_EVENTS)
+    await pubsub.subscribe(CHANNEL_EVENTS, CHANNEL_CHAT)
 
     async def forward() -> None:
         async for message in pubsub.listen():
@@ -81,7 +81,7 @@ async def events(ws: WebSocket) -> None:
             with contextlib.suppress(BaseException):
                 await t
         with contextlib.suppress(Exception):
-            await pubsub.unsubscribe(CHANNEL_EVENTS)
+            await pubsub.unsubscribe(CHANNEL_EVENTS, CHANNEL_CHAT)
             await pubsub.aclose()
         with contextlib.suppress(Exception):
             await ws.close()

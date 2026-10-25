@@ -61,6 +61,26 @@ class Settings(BaseSettings):
     relay_healthy_after: float = 30.0  # running this long resets the backoff counter
     relay_error_after_failures: int = 5  # consecutive failures before status "error"
 
+    # --- chat --------------------------------------------------------------
+    # OAuth apps registered by the owner (see docs/TODO-owner.md). Empty => that
+    # platform's "Connect" button is disabled; manual token entry still works.
+    twitch_client_id: str = ""
+    twitch_client_secret: SecretStr = SecretStr("")
+    google_client_id: str = ""
+    google_client_secret: SecretStr = SecretStr("")
+    kick_client_id: str = ""
+    kick_client_secret: SecretStr = SecretStr("")
+    facebook_app_id: str = ""
+    facebook_app_secret: SecretStr = SecretStr("")
+    graph_api_version: str = "v21.0"
+    # Public base URL for OAuth redirects and the Kick webhook; default https://<domain>.
+    public_url: str = ""
+    allow_fake_chat: bool = False  # enable the "fake" chat platform (tests, demos)
+    chat_poll_interval: float = 5.0  # seconds between manager reconcile passes
+    youtube_daily_quota: int = 10_000  # units/day granted to the Google project
+    youtube_chat_quota_share: float = 0.8  # fraction of the daily quota chat polling may use
+    youtube_stream_mode: bool = False  # experimental: liveChatMessages.streamList
+
     # --- misc --------------------------------------------------------------
     log_level: str = "info"
     log_format: LogFormat = "json"
@@ -95,6 +115,13 @@ class Settings(BaseSettings):
     @property
     def secret_keys(self) -> list[str]:
         return [k.strip() for k in self.secret_key.get_secret_value().split(",") if k.strip()]
+
+    @property
+    def base_url(self) -> str:
+        """Public https base URL (no trailing slash) used in OAuth redirect URIs."""
+        if self.public_url:
+            return self.public_url.rstrip("/")
+        return f"https://{self.domain}"
 
     @property
     def ingest_path(self) -> str:

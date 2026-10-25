@@ -34,6 +34,7 @@ sys.path.insert(0, str(ROOT))
 
 from api.auth import hash_password  # noqa: E402
 from api.main import create_app  # noqa: E402
+from chat.manager import ChatManager  # noqa: E402
 from core.crypto import generate_key  # noqa: E402
 from core.models import DestinationStatus  # noqa: E402
 from core.settings import Settings  # noqa: E402
@@ -169,9 +170,12 @@ async def main_async(port: int, dist: Path) -> int:
         cookie_secure="never",
         web_dist_dir=str(dist),
         relay_poll_interval=0.5,
+        allow_fake_chat=True,
+        chat_poll_interval=0.5,
     )
     fake = FakeMediaMTX()
     supervisor = Supervisor(settings, mediamtx=fake, worker_factory=FakeWorker)  # type: ignore[arg-type]
+    chat_manager = ChatManager(settings)
 
     app: FastAPI = create_app(settings)
     hooks = APIRouter(prefix="/__test")
@@ -196,13 +200,16 @@ async def main_async(port: int, dist: Path) -> int:
     config = uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning")
     server = uvicorn.Server(config)
     sup_task = asyncio.create_task(supervisor.run())
+    chat_task = asyncio.create_task(chat_manager.run())
     print(f"e2e stack on http://127.0.0.1:{port}  (redis {redis_url}, dist {dist})", flush=True)
     try:
         await server.serve()
     finally:
-        sup_task.cancel()
-        with contextlib.suppress(BaseException):
-            await sup_task
+        for t in (sup_task, chat_task):
+            t.cancel()
+        for t in (sup_task, chat_task):
+            with contextlib.suppress(BaseException):
+                await t
         redis_proc.terminate()
         with contextlib.suppress(Exception):
             redis_proc.wait(timeout=5)

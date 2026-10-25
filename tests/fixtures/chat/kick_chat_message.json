@@ -1,0 +1,28 @@
+{
+  "message_id": "01JB2X6N9S9K8W7V6R5T4Y3Z2A",
+  "replies_to": null,
+  "broadcaster": {
+    "is_anonymous": false,
+    "user_id": 1234567,
+    "username": "streamer25",
+    "is_verified": true,
+    "profile_picture": "https://files.kick.com/images/user/1234567/profile_image/conversion/x.webp",
+    "channel_slug": "streamer25",
+    "identity": null
+  },
+  "sender": {
+    "is_anonymous": false,
+    "user_id": 7654321,
+    "username": "kickfan",
+    "is_verified": false,
+    "profile_picture": "https://files.kick.com/images/user/7654321/profile_image/conversion/y.webp",
+    "channel_slug": "kickfan",
+    "identity": {
+      "username_color": "#75FD46",
+      "badges": [{"text": "Moderator", "type": "moderator"}, {"text": "Subscriber", "type": "subscriber", "count": 3}]
+    }
+  },
+  "content": "hello [emote:37226:KEKW] everyone",
+  "emotes": [{"emote_id": "37226", "positions": [{"s": 6, "e": 24}]}],
+  "created_at": "2026-10-25T19:22:40Z"
+}

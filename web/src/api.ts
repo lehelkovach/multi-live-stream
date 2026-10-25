@@ -1,5 +1,14 @@
 /** Thin fetch wrapper. Same-origin, cookie-based session, JSON in/out. */
-import type { Destination, DestinationInput, IngestInfo, RelayState } from "./types";
+import type {
+  ChatAccount,
+  ChatAccountInput,
+  ChatMessage,
+  ChatPlatformInfo,
+  Destination,
+  DestinationInput,
+  IngestInfo,
+  RelayState,
+} from "./types";
 
 export class ApiError extends Error {
   constructor(
@@ -64,4 +73,21 @@ export const relay = {
   start: () => api<{ ok: boolean }>("/api/v1/relay/start", { method: "POST" }),
   stop: () => api<{ ok: boolean }>("/api/v1/relay/stop", { method: "POST" }),
   ingest: () => api<IngestInfo>("/api/v1/relay/ingest"),
+};
+
+export const chat = {
+  platforms: () => api<ChatPlatformInfo[]>("/api/v1/chat/platforms"),
+  accounts: () => api<ChatAccount[]>("/api/v1/chat/accounts"),
+  createAccount: (input: ChatAccountInput) => api<ChatAccount>("/api/v1/chat/accounts", json(input)),
+  updateAccount: (id: number, patch: Partial<ChatAccountInput>) =>
+    api<ChatAccount>(`/api/v1/chat/accounts/${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
+  deleteAccount: (id: number) => api<void>(`/api/v1/chat/accounts/${id}`, { method: "DELETE" }),
+  messages: (params: { limit?: number; before?: string; platform?: string }) => {
+    const q = new URLSearchParams();
+    if (params.limit) q.set("limit", String(params.limit));
+    if (params.before) q.set("before", params.before);
+    if (params.platform) q.set("platform", params.platform);
+    return api<ChatMessage[]>(`/api/v1/chat/messages?${q.toString()}`);
+  },
+  oauthStart: (platform: string) => api<{ url: string }>(`/api/v1/chat/oauth/${platform}/start`),
 };

@@ -694,6 +694,7 @@ dependencies = [
     { name = "sqlmodel" },
     { name = "structlog" },
     { name = "uvicorn", extra = ["standard"] },
+    { name = "websockets" },
 ]
 
 [package.dev-dependencies]
@@ -721,6 +722,7 @@ requires-dist = [
     { name = "sqlmodel", specifier = ">=0.0.22,<0.1" },
     { name = "structlog", specifier = ">=24,<27" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.30,<1" },
+    { name = "websockets", specifier = ">=13,<18" },
 ]
 
 [package.metadata.requires-dev]

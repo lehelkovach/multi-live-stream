@@ -25,8 +25,24 @@ EVENT_DEST_STATUS = "destination.status"  # relay -> dashboard: status changed
 EVENT_DEST_STATS = "destination.stats"  # relay -> dashboard: periodic bitrate/uptime
 
 
+KEY_CHAT_HEARTBEAT = "omni:chat:heartbeat"
+KEY_CHAT_ACCOUNT_STATUS = "omni:chat:{account_id}:status"
+KEY_OAUTH_STATE = "omni:oauth:state:{state}"  # pending OAuth flow (TTL 10 min)
+KEY_YOUTUBE_QUOTA = "omni:youtube:quota:{day}"  # units spent today (UTC day)
+KEY_WEBHOOK_SEEN = "omni:webhook:seen:{platform}:{message_id}"  # dedupe (TTL)
+CHANNEL_WEBHOOKS_KICK = "omni:webhooks:kick"  # api -> kick adapter: verified webhook payloads
+
+EVENT_CHAT_ACCOUNTS_CHANGED = "chat.accounts.changed"  # api -> chat manager
+EVENT_CHAT_ACCOUNT_STATUS = "chat.account.status"  # chat manager -> dashboard
+EVENT_CHAT_MESSAGE = "chat.message"  # chat manager -> dashboard (on CHANNEL_CHAT)
+
+
 def dest_status_key(dest_id: int) -> str:
     return KEY_DEST_STATUS.format(dest_id=dest_id)
+
+
+def chat_status_key(account_id: int) -> str:
+    return KEY_CHAT_ACCOUNT_STATUS.format(account_id=account_id)
 
 
 def make_redis(url: str) -> aioredis.Redis:

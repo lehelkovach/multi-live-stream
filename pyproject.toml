@@ -19,6 +19,7 @@ dependencies = [
     "itsdangerous>=2.2,<3",
     "structlog>=24,<27",
     "python-multipart>=0.0.9,<1",
+    "websockets>=13,<18",
 ]
 
 [dependency-groups]

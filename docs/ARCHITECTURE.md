@@ -1,6 +1,6 @@
 # OmniStream architecture
 
-Status: Phase 2 (dashboard) complete. This document is updated at the start of
+Status: Phase 3 (chat aggregation, read side) complete. This document is updated at the start of
 each phase with the plan for that phase, and at the end with what was actually
 built.
 
@@ -198,6 +198,42 @@ wrong password, login, add (with platform preset), validation error, toggle
 off/on, input going live -> card live with bitrate pushed over the WebSocket,
 Stop all / Start all, input offline -> idle, edit keeping the key, OBS settings,
 reload keeping the session, delete, sign out.
+
+## Chat aggregation (Phase 3)
+
+```
+ Twitch EventSub WS ─┐
+ YouTube Data API  ──┤  chat/adapters/*  ──►  ChatManager (python -m chat)
+ Kick webhooks ──► api ──► Redis omni:webhooks:kick ──┘        │
+ Facebook SSE/poll ──┘                                         ▼
+                                     ChatStore: chat_message table (dedupe on
+                                     platform:id) + PUBLISH omni:chat
+                                                               │
+                                     api /ws/events ◄──────────┘ ──► dashboard Chat tab
+```
+
+* **Adapter contract** (`chat/base.py`): `connect()` / `messages()` / `send()` /
+  `close()`, exceptions tell the manager *why* a stream stopped: `NotLiveError`
+  (no broadcast; retry in 60 s while our ingest is live, 5 min otherwise),
+  `AuthError` and `ConfigError` (owner must act; retry every 5 min), anything
+  else backs off 2 s → 120 s. One runner task per account, so one platform can
+  never block another.
+* **Credentials** are a JSON blob (`access_token`, `refresh_token`, `expires_at`,
+  `extra`) Fernet-encrypted in `chat_account.credentials_encrypted`. Adapters
+  refresh tokens themselves and persist them through a callback that does not
+  bump `updated_at` (which is what the manager watches for config changes).
+* **OAuth** (`chat/oauth.py`): `GET /api/v1/chat/oauth/{platform}/start` returns the
+  authorize URL (state + PKCE verifier kept in Redis for 10 min);
+  `/callback` exchanges the code, looks up the identity (user id / channel /
+  pages) and upserts the account by `(platform, external_id)`.
+* **Kick** has no socket in its public API; it pushes signed webhooks. The API
+  verifies the signature (RSA PKCS#1 v1.5 / SHA-256, key fetched from Kick and
+  cached, re-fetched once on failure), dedupes by message id (Redis SET NX, 1 h)
+  and re-publishes the payload; the Kick adapter filters by broadcaster id.
+* **YouTube quota**: polling costs 5 units; the adapter keeps a per-day counter in
+  Redis and paces itself to the configured share of the daily quota.
+* **History**: `GET /api/v1/chat/messages?limit=&before=&platform=`; the Chat tab
+  merges the last 200 with live socket messages and dedupes by id.
 
 ## Local development & tests
 

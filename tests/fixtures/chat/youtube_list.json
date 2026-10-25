@@ -1,0 +1,54 @@
+{
+  "kind": "youtube#liveChatMessageListResponse",
+  "etag": "etag1",
+  "nextPageToken": "GLiC9ZzGv4kDIJiL1ozGv4kD",
+  "pollingIntervalMillis": 4000,
+  "pageInfo": {"totalResults": 3, "resultsPerPage": 3},
+  "items": [
+    {
+      "kind": "youtube#liveChatMessage",
+      "etag": "e1",
+      "id": "LCC.msg1",
+      "snippet": {
+        "type": "textMessageEvent",
+        "liveChatId": "Cg0KC2FiYzEyMw",
+        "authorChannelId": "UCviewer1",
+        "publishedAt": "2026-10-25T19:21:05.123Z",
+        "hasDisplayContent": true,
+        "displayMessage": "first!",
+        "textMessageDetails": {"messageText": "first!"}
+      },
+      "authorDetails": {
+        "channelId": "UCviewer1",
+        "channelUrl": "http://www.youtube.com/channel/UCviewer1",
+        "displayName": "Viewer One",
+        "profileImageUrl": "https://yt3.ggpht.com/a",
+        "isVerified": false,
+        "isChatOwner": false,
+        "isChatSponsor": true,
+        "isChatModerator": false
+      }
+    },
+    {
+      "kind": "youtube#liveChatMessage",
+      "etag": "e2",
+      "id": "LCC.msg2",
+      "snippet": {
+        "type": "superChatEvent",
+        "liveChatId": "Cg0KC2FiYzEyMw",
+        "authorChannelId": "UCviewer2",
+        "publishedAt": "2026-10-25T19:21:09.000Z",
+        "hasDisplayContent": true,
+        "displayMessage": "€5.00 from Viewer Two: \"great stream\"",
+        "superChatDetails": {"amountMicros": "5000000", "currency": "EUR", "amountDisplayString": "€5.00", "userComment": "great stream", "tier": 2}
+      },
+      "authorDetails": {"channelId": "UCviewer2", "channelUrl": "", "displayName": "Viewer Two", "profileImageUrl": "", "isVerified": false, "isChatOwner": false, "isChatSponsor": false, "isChatModerator": true}
+    },
+    {
+      "kind": "youtube#liveChatMessage",
+      "etag": "e3",
+      "id": "LCC.msg3",
+      "snippet": {"type": "tombstone", "liveChatId": "Cg0KC2FiYzEyMw", "publishedAt": "2026-10-25T19:21:10.000Z"}
+    }
+  ]
+}

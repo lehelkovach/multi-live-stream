@@ -79,6 +79,30 @@ services:
       retries: 3
       start_period: 10s
 
+  # ---- chat: one supervised adapter per connected chat account -------------
+  chat:
+    image: omnistream-app:local
+    restart: unless-stopped
+    command: ["python", "-m", "chat"]
+    env_file:
+      - path: .env
+        required: true
+    environment:
+      <<: *app-env
+    volumes:
+      - app_data:/data
+    depends_on:
+      api:
+        condition: service_started
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-m", "chat", "--healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
   # ---- state / pub-sub -----------------------------------------------------
   redis:
     image: redis:7-alpine

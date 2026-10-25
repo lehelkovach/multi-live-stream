@@ -9,7 +9,7 @@ from urllib.parse import urlsplit
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from core.models import Platform, Profile
+from core.models import ChatPlatform, Platform, Profile
 
 # ---- auth ---------------------------------------------------------------------
 
@@ -202,3 +202,74 @@ class IngestInfo(BaseModel):
     srt_url: str
     stream_key: str
     path: str
+
+
+# ---- chat ---------------------------------------------------------------------
+
+
+class ChatAccountRuntime(BaseModel):
+    status: str
+    detail: str | None = None
+    last_error: str | None = None
+    updated_at: float | None = None
+
+
+class ChatAccountOut(BaseModel):
+    id: int
+    platform: str
+    display_name: str
+    channel_ref: str
+    external_id: str
+    enabled: bool
+    status: str
+    last_error: str | None
+    has_credentials: bool
+    pages: list[dict[str, str]] = Field(default_factory=list)  # facebook: selectable pages
+    runtime: ChatAccountRuntime | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class ChatAccountCreate(BaseModel):
+    """Manual connection: paste a token instead of using the OAuth button."""
+
+    platform: ChatPlatform
+    display_name: str = Field(default="", max_length=100)
+    channel_ref: str = Field(default="", max_length=500)
+    access_token: str = Field(default="", max_length=4000)
+    refresh_token: str = Field(default="", max_length=4000)
+    enabled: bool = True
+    extra: dict[str, object] = Field(default_factory=dict)
+
+
+class ChatAccountUpdate(BaseModel):
+    display_name: str | None = Field(default=None, max_length=100)
+    channel_ref: str | None = Field(default=None, max_length=500)
+    enabled: bool | None = None
+    access_token: str | None = Field(default=None, max_length=4000)
+    refresh_token: str | None = Field(default=None, max_length=4000)
+    extra: dict[str, object] | None = None
+
+
+class ChatMessageOut(BaseModel):
+    id: str
+    platform: str
+    account_id: int | None
+    author: str
+    author_id: str
+    text: str
+    timestamp: datetime
+    is_own: bool
+    kind: str = "text"
+    badges: list[str] = Field(default_factory=list)
+
+
+class ChatPlatformInfo(BaseModel):
+    platform: str
+    label: str
+    oauth_configured: bool
+    manual_hint: str
+
+
+class OAuthStartOut(BaseModel):
+    url: str

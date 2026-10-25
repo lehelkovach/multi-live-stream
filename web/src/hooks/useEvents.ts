@@ -4,17 +4,21 @@
  * re-syncs from REST after every (re)connect and every 30 s as a safety net.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
-import { destinations as destApi, relay as relayApi } from "../api";
-import type { Destination, RelayState, Runtime, Status } from "../types";
+import { chat as chatApi, destinations as destApi, relay as relayApi } from "../api";
+import type { ChatAccount, ChatMessage, Destination, RelayState, Runtime, Status } from "../types";
 
 export type ConnState = "connecting" | "connected" | "offline";
 
 interface EventsState {
   destinations: Destination[];
   relay: RelayState | null;
+  accounts: ChatAccount[];
+  chat: ChatMessage[]; // live messages received over the socket (bounded)
   conn: ConnState;
   error: string | null;
 }
+
+const MAX_LIVE_CHAT = 500;
 
 type Snapshot = { type: "snapshot"; destinations: Destination[]; relay: RelayState };
 type DestEvent = { type: "destination.status" | "destination.stats"; id: number } & Partial<Runtime>;
@@ -24,7 +28,39 @@ type AnyEvent =
   | { type: "destinations.changed" }
   | { type: "relay.changed"; enabled: boolean }
   | { type: "ingest.state"; live: boolean; since: string | null; bitrate_kbps: number; tracks: string[]; source: string | null }
+  | ({ type: "chat.message" } & ChatMessage)
+  | { type: "chat.account.status"; id: number; status: string; detail: string | null; last_error: string | null; updated_at: number | null }
+  | { type: "chat.accounts.changed" }
   | { type: string };
+
+/** Seconds-since-epoch of a runtime blob (handles ISO strings and float seconds). */
+function stamp(value: string | number | null | undefined): number {
+  if (value == null) return 0;
+  if (typeof value === "number") return value;
+  const t = Date.parse(value);
+  return Number.isNaN(t) ? 0 : t / 1000;
+}
+
+/**
+ * A REST response can be older than a status event that arrived over the socket
+ * while the request was in flight. Keep whichever runtime is newer per id.
+ */
+function newest<
+  T extends { id: number; status: string; last_error: string | null; runtime: { updated_at: string | number | null } | null },
+>(
+  incoming: T[],
+  current: T[],
+): T[] {
+  const byId = new Map(current.map((c) => [c.id, c]));
+  return incoming.map((item) => {
+    const local = byId.get(item.id);
+    if (!local?.runtime) return item;
+    if (!item.runtime || stamp(local.runtime.updated_at) > stamp(item.runtime.updated_at)) {
+      return { ...item, status: local.status, runtime: local.runtime, last_error: local.last_error };
+    }
+    return item;
+  });
+}
 
 function mergeRuntime(dest: Destination, evt: DestEvent): Destination {
   const runtime: Runtime = {
@@ -46,17 +82,47 @@ function mergeRuntime(dest: Destination, evt: DestEvent): Destination {
 }
 
 export function useEvents(enabled: boolean) {
-  const [state, setState] = useState<EventsState>({ destinations: [], relay: null, conn: "connecting", error: null });
+  const [state, setState] = useState<EventsState>({ destinations: [], relay: null, accounts: [], chat: [], conn: "connecting", error: null });
   const wsRef = useRef<WebSocket | null>(null);
   const attemptRef = useRef(0);
   const stoppedRef = useRef(false);
+  // status events for accounts the list does not contain yet (created a moment ago)
+  const pendingAccountRef = useRef(new Map<number, Pick<ChatAccount, "status" | "last_error" | "runtime">>());
+
+  const applyPending = useCallback((accounts: ChatAccount[]): ChatAccount[] => {
+    const pending = pendingAccountRef.current;
+    if (pending.size === 0) return accounts;
+    return accounts.map((a) => {
+      const p = pending.get(a.id);
+      if (!p) return a;
+      pending.delete(a.id);
+      if (a.runtime && p.runtime && stamp(a.runtime.updated_at) >= stamp(p.runtime.updated_at)) return a;
+      return { ...a, status: a.enabled ? p.status : "disabled", last_error: p.last_error, runtime: p.runtime };
+    });
+  }, []);
 
   const refresh = useCallback(async () => {
+    // (applyPending is stable; declared above)
     try {
-      const [destinations, relay] = await Promise.all([destApi.list(), relayApi.state()]);
-      setState((s) => ({ ...s, destinations, relay, error: null }));
+      const [destinations, relay, accounts] = await Promise.all([destApi.list(), relayApi.state(), chatApi.accounts()]);
+      setState((s) => ({
+        ...s,
+        destinations: newest(destinations, s.destinations),
+        relay,
+        accounts: applyPending(newest(accounts, s.accounts)),
+        error: null,
+      }));
     } catch (err) {
       setState((s) => ({ ...s, error: err instanceof Error ? err.message : String(err) }));
+    }
+  }, []);
+
+  const refreshAccounts = useCallback(async () => {
+    try {
+      const accounts = await chatApi.accounts();
+      setState((s) => ({ ...s, accounts: applyPending(newest(accounts, s.accounts)) }));
+    } catch {
+      /* keep previous */
     }
   }, []);
 
@@ -116,6 +182,45 @@ export function useEvents(enabled: boolean) {
           case "relay.changed":
             void refresh();
             break;
+          case "chat.accounts.changed":
+            void refreshAccounts();
+            break;
+          case "chat.account.status": {
+            const ae = evt as Extract<AnyEvent, { type: "chat.account.status" }>;
+            setState((s) => {
+              if (!s.accounts.some((a) => a.id === ae.id)) {
+                pendingAccountRef.current.set(ae.id, {
+                  status: ae.status,
+                  last_error: ae.last_error,
+                  runtime: { status: ae.status, detail: ae.detail, last_error: ae.last_error, updated_at: ae.updated_at ?? Date.now() / 1000 },
+                });
+                return s;
+              }
+              return {
+              ...s,
+              accounts: s.accounts.map((a) =>
+                a.id === ae.id
+                  ? {
+                      ...a,
+                      status: a.enabled ? ae.status : "disabled",
+                      last_error: ae.last_error,
+                      runtime: { status: ae.status, detail: ae.detail, last_error: ae.last_error, updated_at: ae.updated_at ?? Date.now() / 1000 },
+                    }
+                  : a,
+              ),
+              };
+            });
+            break;
+          }
+          case "chat.message": {
+            const { type: _t, ...message } = evt as Extract<AnyEvent, { type: "chat.message" }>;
+            setState((s) => {
+              if (s.chat.some((m) => m.id === message.id)) return s;
+              const chat = [...s.chat, message as ChatMessage];
+              return { ...s, chat: chat.length > MAX_LIVE_CHAT ? chat.slice(chat.length - MAX_LIVE_CHAT) : chat };
+            });
+            break;
+          }
           default:
             break;
         }
@@ -142,7 +247,8 @@ export function useEvents(enabled: boolean) {
       wsRef.current?.close();
       wsRef.current = null;
     };
-  }, [enabled, refresh]);
+  }, [enabled, refresh, refreshAccounts]);
 
-  return { ...state, refresh };
+
+  return { ...state, refresh, refreshAccounts };
 }

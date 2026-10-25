@@ -96,3 +96,35 @@ test("login → add destination → toggle → live status over websocket", asyn
   await page.getByTestId("logout").click();
   await expect(page.getByTestId("login-submit")).toBeVisible();
 });
+
+test("chat: add a fake account → messages stream into the unified pane", async ({ page }) => {
+  await login(page);
+  await page.getByTestId("tab-accounts").click();
+  await page.getByTestId("manual-fake").click();
+  await page.getByTestId("manual-name").fill("Demo chat");
+  await page.getByTestId("manual-submit").click();
+  const account = page.getByTestId("chat-account").filter({ hasText: "Demo chat" });
+  await expect(account).toBeVisible();
+  await expect(account.getByTestId("account-status")).toHaveAttribute("data-status", "connected", { timeout: 15_000 });
+
+  await page.getByTestId("tab-chat").click();
+  await expect(page.getByTestId("chat-message").first()).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByTestId("chat-message").nth(2)).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByTestId("chat-message").first()).toContainText("fake platform");
+  await expect(page.getByTestId("chat-summary")).toContainText("1/1 connected");
+
+  // messages survive a reload (history) and keep flowing
+  const before = await page.getByTestId("chat-message").count();
+  await page.reload();
+  await page.getByTestId("tab-chat").click();
+  await expect(page.getByTestId("chat-message").first()).toBeVisible();
+  await expect.poll(async () => page.getByTestId("chat-message").count(), { timeout: 15_000 }).toBeGreaterThan(before);
+
+  // disabling the account stops it without touching the history
+  await page.getByTestId("tab-accounts").click();
+  await account.getByTestId("account-toggle").click();
+  await expect(account.getByTestId("account-status")).toHaveAttribute("data-status", "disabled", { timeout: 15_000 });
+  page.once("dialog", (d) => d.accept());
+  await account.getByRole("button", { name: "Disconnect" }).click();
+  await expect(account).toHaveCount(0);
+});

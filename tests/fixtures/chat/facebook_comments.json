@@ -1,0 +1,7 @@
+{
+  "data": [
+    {"created_time": "2026-10-25T19:23:30+0000", "from": {"name": "Pat Example", "id": "10203040506070"}, "message": "watching from Berlin", "id": "9876543210_2"},
+    {"created_time": "2026-10-25T19:23:10+0000", "from": {"name": "Streamer Page", "id": "555000111"}, "message": "welcome everyone", "id": "9876543210_1"}
+  ],
+  "paging": {"cursors": {"before": "QVFI", "after": "QVFJ"}}
+}

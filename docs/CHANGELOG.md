@@ -2,6 +2,34 @@
 
 One entry per completed phase (plus notable fixes). Newest first.
 
+## Phase 3 - Chat aggregation, read side (2026-10-25)
+
+* `chat/` package: `ChatAdapter` protocol, normalized `ChatMessage`, encrypted
+  `Credentials`, OAuth helpers (authorize/exchange/refresh/identity) for Twitch,
+  Google/YouTube, Kick (PKCE) and Facebook (long-lived Page tokens).
+* Adapters: Twitch (EventSub WebSocket, hourly token validation, reconnect and
+  revocation handling), YouTube (broadcast lookup, quota-aware adaptive polling,
+  experimental streamList), Kick (signed webhooks relayed through Redis, automatic
+  event subscription), Facebook (SSE live_comments with polling fallback), and a
+  fake adapter for tests/demos.
+* `python -m chat` manager (new `chat` Compose service): one supervised runner per
+  enabled account; NotLive/Auth/Config/transient failures handled per account with
+  the right wait; wakes on ingest-live and account-change events.
+* Persistence + fan-out: messages stored once (`chat_message`), published on Redis,
+  forwarded over `/ws/events`; account status blobs + events like destinations.
+* API: `/api/v1/chat/{platforms,accounts,messages}`, OAuth start/callback, public
+  signature-verified `POST /api/v1/webhooks/kick` with replay protection.
+* Dashboard: Stream / Chat / Accounts tabs; unified chat pane with platform tags,
+  badges, filter chips, auto-scroll; Accounts tab with Connect (OAuth) and Token
+  (manual) flows, status pills, enable toggles, Facebook page picker.
+* Tests: recorded fixtures per adapter (Twitch notification, YouTube list page,
+  Kick webhook payload, Facebook comments), a local EventSub websocket server,
+  mocked HTTP transports, Kick signature round-trip, manager isolation (one failing
+  account never affects another), API tests, Playwright chat flow with the fake
+  adapter.
+* Docs: platform table with verified endpoints/scopes/quota math, owner TODOs for
+  the four OAuth apps and the Kick webhook URL.
+
 ## Phase 2 - Dashboard (2026-10-25)
 
 * Mobile-first React dashboard: login, destination cards (status pill, bitrate,

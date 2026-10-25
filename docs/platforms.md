@@ -25,6 +25,22 @@ are compiled in); first real-platform runs should be checked with `make logs S=r
 Keyframe interval: YouTube/Twitch/Facebook want a keyframe every 2 s (Kick/X are
 fine with it too). Set OBS to a 2 s keyframe interval; `copy` cannot change it.
 
-## Chat APIs
+## Chat APIs (Phase 3: read; Phase 4: send)
 
-Filled in during Phase 3/4.
+Verified against the official docs on 2026-10-25. Each row is what the adapter in
+`chat/adapters/<platform>.py` implements.
+
+| Platform | Read | Send (Phase 4) | Auth / scopes | Notes |
+|----------|------|----------------|---------------|-------|
+| Twitch | EventSub **WebSocket** `wss://eventsub.wss.twitch.tv/ws`, subscription `channel.chat.message` v1 via `POST helix/eventsub/subscriptions` (`transport.method=websocket`) | `POST helix/chat/messages` (`broadcaster_id`, `sender_id`, `message`) | User token of the broadcaster: `user:read:chat` (+ `user:write:chat`). Validate hourly at `id.twitch.tv/oauth2/validate`; refresh at `oauth2/token`. | Keepalive timeout, `session_reconnect` and `revocation` handled. Max 300 subs/connection. |
+| YouTube | `liveBroadcasts.list?broadcastStatus=active` (1 unit) → `snippet.liveChatId`; `liveChatMessages.list` (**5 units/call**, honours `pollingIntervalMillis`). Opt-in `streamList` (server streaming, 5 units/connection) via `OMNI_YOUTUBE_STREAM_MODE`. | `liveChatMessages.insert` (20 units) | Google OAuth, scope `youtube.force-ssl` (read+write), `access_type=offline` for a refresh token. | Default project quota is 10,000 units/day ≈ 2,000 polls. The adapter stretches the poll interval to fit `OMNI_YOUTUBE_DAILY_QUOTA × OMNI_YOUTUBE_CHAT_QUOTA_SHARE` and slows down when chat is quiet. Request a quota increase in Google Cloud for long daily streams. |
+| Kick | Official **webhooks**: `POST /public/v1/events/subscriptions` for `chat.message.sent`; Kick POSTs to `https://<domain>/api/v1/webhooks/kick`, signed RSA-SHA256 over `message_id.timestamp.body` (public key from `GET /public/v1/public-key`). | `POST /public/v1/chat` (`type: user`, `broadcaster_user_id`, `content` ≤ 500 chars) | OAuth 2.1 with PKCE at `id.kick.com`; scopes `user:read channel:read chat:write events:subscribe`. | The webhook URL is set in the Kick app settings (owner task). Unverified apps may hold up to 1,000 chat subscriptions. The unofficial Pusher socket is **not** used. |
+| Facebook | SSE `https://streaming-graph.facebook.com/{live-video-id}/live_comments` with a Page token; fallback polling `GET /{live-video-id}/comments?order=reverse_chronological&live_filter=no_filter` every 3 s. Live video found via `GET /{page-id}/live_videos?broadcast_status=["LIVE"]`. | Not available on the live-video comments edge per the current reference; to be verified in Phase 4 (likely `POST /{video-id}/comments`). | Facebook Login → long-lived user token → Page tokens from `/me/accounts`; permissions `pages_show_list`, `pages_read_engagement`, `pages_read_user_content`, `pages_manage_engagement`. App review needed for non-admin use. | Pasting a Page access token manually also works (`channel_ref` = Page id). |
+| X | — | — | — | X has no public live chat API; chat can only be reached via Phase 5 mobile automation. |
+
+### Quota math for YouTube
+
+`list` costs 5 units, so a 5 s poll is 3,600 units/hour: a 10,000-unit project allows
+about 2.2 hours of chat per day. The adapter keeps a daily counter in Redis
+(`omni:youtube:quota:<day>`) and raises the interval so the configured share lasts
+until the UTC reset; the dashboard shows `waiting` with the reason when it pauses.

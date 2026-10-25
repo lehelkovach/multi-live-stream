@@ -1,20 +1,28 @@
-import type { Status } from "../types";
+/** Status badge shared by destinations (relay) and chat accounts. */
 
-const LABELS: Record<Status, string> = {
+const LABELS: Record<string, string> = {
+  // relay destinations
   disabled: "disabled",
   idle: "idle",
   starting: "starting",
   live: "live",
   retrying: "retrying",
   error: "error",
+  // chat accounts
+  connecting: "connecting",
+  connected: "connected",
+  waiting: "waiting",
+  auth_error: "needs login",
 };
 
-export function StatusPill({ status, testId }: { status: Status | string; testId?: string }) {
-  const known = (status in LABELS ? status : "idle") as Status;
+const PULSING = new Set(["live", "connected"]);
+
+export function StatusPill({ status, testId }: { status: string; testId?: string }) {
+  const label = LABELS[status] ?? status.replace(/_/g, " ");
   return (
-    <span className={`pill pill-${known}`} data-testid={testId ?? "dest-status"} data-status={known}>
-      {status === "live" && <span className="dot" aria-hidden="true" />}
-      {LABELS[known] ?? status}
+    <span className={`pill pill-${status}`} data-testid={testId ?? "dest-status"} data-status={status}>
+      {PULSING.has(status) && <span className="dot" aria-hidden="true" />}
+      {label}
     </span>
   );
 }

@@ -14,12 +14,14 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+import httpx
 from fastapi import FastAPI
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from api.auth import LoginRateLimiter, PasswordVerifier, SessionSigner
-from api.routers import auth, destinations, health, ingest, relay, ws
+from api.routers import auth, chat, destinations, health, ingest, relay, ws
+from chat.kick_webhook import PublicKeyCache
 from core import __version__
 from core.crypto import SecretBox
 from core.db import init_db, make_engine
@@ -46,10 +48,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.engine = make_engine(settings.database_url)
         init_db(app.state.engine)
         app.state.redis = make_redis(settings.redis_url)
+        app.state.http = httpx.AsyncClient(headers={"User-Agent": "OmniStream/0.1 (+api)"})
+        app.state.kick_public_key = PublicKeyCache()
         log.info("api.started", version=__version__, domain=settings.domain)
         try:
             yield
         finally:
+            await app.state.http.aclose()
             await app.state.redis.aclose()
             app.state.engine.dispose()
             log.info("api.stopped")
@@ -67,6 +72,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(ingest.router)
     app.include_router(destinations.router)
     app.include_router(relay.router)
+    app.include_router(chat.protected)
+    app.include_router(chat.router)
+    app.include_router(chat.webhooks)
     app.include_router(ws.router)
     _mount_web(app, Path(settings.web_dist_dir))
     return app

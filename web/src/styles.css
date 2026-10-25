@@ -97,9 +97,9 @@ code.wrap { word-break: break-all; }
   padding: 5px 10px; border-radius: 999px; white-space: nowrap;
   background: var(--surface-2); color: var(--muted); border: 1px solid var(--border);
 }
-.pill-live { background: var(--ok-soft); color: var(--ok); border-color: transparent; }
-.pill-starting, .pill-retrying { background: var(--warn-soft); color: var(--warn); border-color: transparent; }
-.pill-error { background: var(--accent-soft); color: var(--accent); border-color: transparent; }
+.pill-live, .pill-connected { background: var(--ok-soft); color: var(--ok); border-color: transparent; }
+.pill-starting, .pill-retrying, .pill-connecting, .pill-waiting { background: var(--warn-soft); color: var(--warn); border-color: transparent; }
+.pill-error, .pill-auth_error { background: var(--accent-soft); color: var(--accent); border-color: transparent; }
 .pill-disabled { opacity: 0.7; }
 .dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; display: inline-block; animation: pulse 1.6s ease-in-out infinite; }
 @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
@@ -184,3 +184,42 @@ input:focus, select:focus { outline: 2px solid var(--primary); outline-offset: 1
   background: var(--text); color: var(--bg); padding: 10px 16px; border-radius: 999px; font-weight: 600; font-size: 0.9rem;
   box-shadow: 0 6px 20px rgba(0,0,0,0.35); z-index: 30;
 }
+
+/* ---- tabs ---- */
+.tabs { display: flex; gap: 6px; margin: 0 0 12px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 4px; }
+.tab { flex: 1; border: 0; background: transparent; color: var(--muted); font: inherit; font-weight: 650; padding: 9px 0; border-radius: 9px; cursor: pointer; min-height: 40px; }
+.tab.on { background: var(--surface-2); color: var(--text); }
+.section-title { margin: 14px 0 8px; }
+
+/* ---- chat ---- */
+.chat { display: flex; flex-direction: column; height: calc(100vh - 150px); min-height: 360px; position: relative; }
+.chat-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+.chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.chip { border: 1px solid var(--border); background: var(--surface); color: var(--muted); border-radius: 999px; padding: 5px 10px; font: inherit; font-size: 0.78rem; font-weight: 650; cursor: pointer; }
+.chip.on { background: var(--surface-2); color: var(--text); border-color: var(--primary); }
+.chat-list { flex: 1; overflow-y: auto; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 8px 10px; overscroll-behavior: contain; }
+.msg { display: grid; grid-template-columns: auto 1fr auto; gap: 8px; align-items: baseline; padding: 6px 2px; border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent); font-size: 0.95rem; line-height: 1.4; }
+.msg:last-child { border-bottom: 0; }
+.msg.own { background: var(--primary-soft); border-radius: 8px; padding-left: 6px; padding-right: 6px; }
+.msg.superchat { background: var(--warn-soft); border-radius: 8px; padding-left: 6px; padding-right: 6px; }
+.msg-author { font-weight: 700; margin-right: 2px; }
+.msg-text { overflow-wrap: anywhere; }
+.msg-time { white-space: nowrap; }
+.tag { font-size: 0.66rem; font-weight: 800; padding: 2px 5px; border-radius: 5px; color: #fff; background: #4b5563; align-self: center; }
+.tag-twitch, .chip-twitch.on { background: #9146ff; }
+.tag-youtube, .chip-youtube.on { background: #e62117; }
+.tag-facebook, .chip-facebook.on { background: #1877f2; }
+.tag-kick, .chip-kick.on { background: #53fc18; color: #111; }
+.tag-fake { background: #6b7280; }
+.chip.on[class*="chip-"] { color: #fff; border-color: transparent; }
+.mini-badge { font-size: 0.7rem; margin-left: 3px; color: var(--muted); }
+.mini-moderator { color: var(--ok); }
+.mini-owner, .mini-broadcaster { color: var(--warn); }
+.jump { position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%); box-shadow: 0 6px 20px rgba(0,0,0,0.35); }
+
+/* ---- accounts ---- */
+.connect-grid { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
+.connect-row { display: flex; align-items: center; gap: 10px; padding: 6px 0; border-top: 1px solid var(--border); }
+.connect-row:first-child { border-top: 0; }
+.connect-name { font-weight: 650; }
+.connect-row .avatar { width: 34px; height: 34px; border-radius: 10px; font-size: 0.7rem; }

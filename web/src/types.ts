@@ -82,3 +82,58 @@ export const PROFILES: { value: Profile; label: string; hint: string }[] = [
   { value: "vertical_720p", label: "Vertical 720p", hint: "Centre-crop to 9:16, re-encode 720x1280 @ 2.5 Mbps." },
   { value: "custom", label: "Custom ffmpeg args", hint: "Output options placed before the destination URL." },
 ];
+
+export type ChatPlatform = "twitch" | "youtube" | "kick" | "facebook" | "fake";
+
+export interface ChatAccountRuntime {
+  status: string;
+  detail: string | null;
+  last_error: string | null;
+  updated_at: number | null;
+}
+
+export interface ChatAccount {
+  id: number;
+  platform: ChatPlatform | string;
+  display_name: string;
+  channel_ref: string;
+  external_id: string;
+  enabled: boolean;
+  status: string;
+  last_error: string | null;
+  has_credentials: boolean;
+  pages: { id: string; name: string }[];
+  runtime: ChatAccountRuntime | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ChatMessage {
+  id: string;
+  platform: string;
+  account_id: number | null;
+  author: string;
+  author_id: string;
+  text: string;
+  timestamp: string;
+  is_own: boolean;
+  kind: string;
+  badges: string[];
+}
+
+export interface ChatPlatformInfo {
+  platform: string;
+  label: string;
+  oauth_configured: boolean;
+  manual_hint: string;
+}
+
+export interface ChatAccountInput {
+  platform: string;
+  display_name: string;
+  channel_ref: string;
+  access_token: string;
+  refresh_token: string;
+  enabled: boolean;
+  extra: Record<string, unknown>;
+}
