@@ -2,6 +2,46 @@
 
 One entry per completed phase (plus notable fixes). Newest first.
 
+## Full-stack verification + fixes (2026-10-28)
+
+The real `docker compose up -d` stack was run end to end for the first time (in
+the development sandbox; linux/amd64, arm64 is covered by the CI image builds):
+all services healthy, HTTPS + HTTP redirect through Caddy, `/internal/*` blocked
+at the edge, Secure/HttpOnly session cookie, WebSocket through the edge, RTMP and
+SRT ingest with good and wrong keys, relay to a fake platform container on the
+Compose network, SIGKILL of an output's ffmpeg recovered, chat read + broadcast
+across containers, `make check-config`, `make backup`, data surviving down/up.
+It exposed these bugs, all fixed with tests:
+
+* **`/metrics` returned the dashboard HTML through the edge**: Caddy only routed
+  `/api`, `/ws` and `/healthz` to the API. Added; a new test fails if any
+  top-level API route is not proxied by `deploy/Caddyfile`.
+* **The documented restore broke the database**: copying a backup into the volume
+  as root left a file the app user (uid 10001) could not write, so every change
+  returned 500 while health checks stayed green. Added `omnistream restore` /
+  `make restore FILE=...` (validates, keeps a pre-restore copy, fixes ownership,
+  clears stale WAL files, always restarts the services); backups are now
+  self-contained rollback-journal files; `/api/v1/health` and a startup log line
+  report a read-only database.
+* **Stream end looked like a failure**: ffmpeg's clean exit when the publisher
+  disconnects was reported as "ffmpeg exited with code 0" and followed by a blind
+  retry that failed with RTSP 404. It is now "input stream ended", not counted as
+  a failure, and the worker waits for the supervisor (stop if offline, immediate
+  restart if the publisher is back).
+* **Every relay error message was wrapped in shell quotes** (it went through
+  `shlex.join`); secrets are now redacted from the plain text.
+* **YouTube chat polled every ~22 s most of the day**: the quota pacer spread the
+  daily budget evenly until midnight UTC. It now keeps enough budget for
+  `OMNI_YOUTUBE_CHAT_HOURS` (default 3) of polling, about 7 s per poll on a default
+  project, stretching only if the stream runs longer.
+* **Dashboard race**: a delivery or account-status event arriving just before the
+  browser handled the matching API response could be lost (a send stayed
+  "pending"); early events are now buffered in React state with pure updaters.
+* **Fake chat adapter ids collided** after an account was deleted and re-created
+  (SQLite reuses row ids), so new messages were deduplicated away. Ids now carry a
+  per-instance token. The Playwright chat flow uses unique names per run and
+  passes 10/10 when repeated on one server.
+
 ## Phase 6 - Hardening (2026-10-25)
 
 * `GET /metrics` (Prometheus text format; dashboard session or

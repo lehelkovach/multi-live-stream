@@ -26,7 +26,7 @@ from typing import Any
 
 from core.logging import get_logger
 from core.models import DestinationStatus
-from relay.ffmpeg import Progress, redact
+from relay.ffmpeg import Progress, redact, redact_text
 
 log = get_logger(__name__)
 
@@ -42,6 +42,9 @@ class WorkerConfig:
     error_after_failures: int = 5
     stop_grace: float = 5.0
     stats_interval: float = 2.0
+    # After the input ends cleanly the worker waits for the supervisor: it is either
+    # stopped (input offline) or poked (publisher back). This caps that wait.
+    input_ended_wait: float = 30.0
 
 
 @dataclass
@@ -130,6 +133,8 @@ class DestinationWorker:
         self._secrets = secrets or []
         self.status = WorkerStatus(id=dest_id, name=name)
         self._stop = asyncio.Event()
+        self._poke = asyncio.Event()
+        self._input_ended = False
         self._task: asyncio.Task[None] | None = None
         self._proc: asyncio.subprocess.Process | None = None
         self._log = log.bind(dest_id=dest_id, dest=name)
@@ -147,6 +152,10 @@ class DestinationWorker:
             with contextlib.suppress(asyncio.CancelledError):
                 await self._task
             self._task = None
+
+    def poke(self) -> None:
+        """Input is live: if waiting after a clean end of input, restart now."""
+        self._poke.set()
 
     @property
     def running(self) -> bool:
@@ -181,29 +190,11 @@ class DestinationWorker:
                 await self._run_once()
                 if self._stop.is_set():
                     break
-                delay = compute_backoff(
-                    self.status.consecutive_failures,
-                    self.config.backoff_base,
-                    self.config.backoff_max,
-                )
                 self.status.restarts += 1
-                self.status.next_retry_at = datetime.fromtimestamp(
-                    time.time() + delay, UTC
-                ).isoformat()
-                status = (
-                    DestinationStatus.ERROR
-                    if self.status.consecutive_failures >= self.config.error_after_failures
-                    else DestinationStatus.RETRYING
-                )
-                self._log.warning(
-                    "worker.retrying",
-                    delay_s=round(delay, 1),
-                    failures=self.status.consecutive_failures,
-                    error=self.status.last_error,
-                )
-                await self._set_status(status)
-                with contextlib.suppress(TimeoutError):
-                    await asyncio.wait_for(self._stop.wait(), timeout=delay)
+                if self._input_ended:
+                    await self._wait_for_input()
+                else:
+                    await self._backoff()
         except asyncio.CancelledError:
             await self._terminate_process()
             raise
@@ -212,6 +203,47 @@ class DestinationWorker:
             await self._set_status(
                 DestinationStatus.ERROR, error="relay worker crashed (see relay logs)"
             )
+
+    async def _wait_for_input(self) -> None:
+        """Clean end of input: not a failure. The supervisor stops us if the input is
+        gone, or pokes us once it is live again (an OBS reconnect resumes at once)."""
+        self.status.next_retry_at = None
+        self._log.info("worker.input_ended")
+        await self._set_status(DestinationStatus.IDLE)
+        self._poke.clear()
+        stop = asyncio.ensure_future(self._stop.wait())
+        poke = asyncio.ensure_future(self._poke.wait())
+        try:
+            await asyncio.wait(
+                {stop, poke},
+                timeout=self.config.input_ended_wait,
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+        finally:
+            for fut in (stop, poke):
+                fut.cancel()
+
+    async def _backoff(self) -> None:
+        delay = compute_backoff(
+            self.status.consecutive_failures,
+            self.config.backoff_base,
+            self.config.backoff_max,
+        )
+        self.status.next_retry_at = datetime.fromtimestamp(time.time() + delay, UTC).isoformat()
+        status = (
+            DestinationStatus.ERROR
+            if self.status.consecutive_failures >= self.config.error_after_failures
+            else DestinationStatus.RETRYING
+        )
+        self._log.warning(
+            "worker.retrying",
+            delay_s=round(delay, 1),
+            failures=self.status.consecutive_failures,
+            error=self.status.last_error,
+        )
+        await self._set_status(status)
+        with contextlib.suppress(TimeoutError):
+            await asyncio.wait_for(self._stop.wait(), timeout=delay)
 
     async def _run_once(self) -> None:
         cfg = self.config
@@ -315,13 +347,19 @@ class DestinationWorker:
         if self._stop.is_set():
             self._log.info("worker.stopped", rc=rc, ran_for_s=round(ran_for, 1))
             return
+        # ffmpeg exits 0 when its input ends (the publisher disconnected): not a failure
+        self._input_ended = rc == 0 and stall_reason is None
+        if self._input_ended:
+            self.status.last_error = "input stream ended"
+            self._log.info("worker.exited", rc=rc, ran_for_s=round(ran_for, 1))
+            return
         if ran_for >= cfg.healthy_after:
             self.status.consecutive_failures = 1  # fresh failure after a healthy run
         else:
             self.status.consecutive_failures += 1
         tail = " | ".join(list(stderr_tail)[-5:])
         reason = stall_reason or f"ffmpeg exited with code {rc}"
-        error = redact([f"{reason}: {tail}" if tail else reason], self._secrets)
+        error = redact_text(f"{reason}: {tail}" if tail else reason, self._secrets)
         self.status.last_error = error[:2000]
         self._log.warning(
             "worker.exited", rc=rc, ran_for_s=round(ran_for, 1), error=self.status.last_error

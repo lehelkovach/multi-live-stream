@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import itertools
+import uuid
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 
@@ -31,6 +32,9 @@ class FakeAdapter:
         self.limit = int(ctx.credentials.extra.get("limit") or 0)  # 0 = unlimited
         self._queue: asyncio.Queue[ChatMessage] = asyncio.Queue()
         self._counter = itertools.count(1)
+        # Message ids must be unique forever (the store dedupes on them), and SQLite
+        # reuses a deleted account's id, so ids carry a per-instance run token.
+        self._run = uuid.uuid4().hex[:8]
         self._stop = False
 
     async def connect(self) -> None:
@@ -52,7 +56,7 @@ class FakeAdapter:
             n = next(self._counter)
             emitted += 1
             yield ChatMessage(
-                id=f"{self.ctx.account.id}-{n}",
+                id=f"{self._run}-{n}",
                 platform="fake",
                 author=author,
                 author_id=author_id,
@@ -70,7 +74,7 @@ class FakeAdapter:
         n = next(self._counter)
         await self._queue.put(
             ChatMessage(
-                id=f"{self.ctx.account.id}-own-{n}",
+                id=f"{self._run}-own-{n}",
                 platform="fake",
                 author=self.ctx.account.display_name or "me",
                 author_id="me",
@@ -80,7 +84,7 @@ class FakeAdapter:
                 account_id=self.ctx.account.id,
             )
         )
-        return SendResult(True, message_id=f"{self.ctx.account.id}-own-{n}")
+        return SendResult(True, message_id=f"{self._run}-own-{n}")
 
     async def close(self) -> None:
         self._stop = True

@@ -143,3 +143,46 @@ async def test_secrets_redacted_in_error() -> None:
     await wait_for(lambda: w.status.last_error is not None)
     await w.stop()
     assert "supersecretkey" not in (w.status.last_error or "")
+
+
+async def test_clean_end_of_input_waits_for_the_supervisor() -> None:
+    """ffmpeg exits 0 when the publisher disconnects: no failure, no blind retry."""
+    cfg = WorkerConfig(backoff_base=0.1, backoff_max=0.5, input_ended_wait=30.0)
+    rec = Recorder()
+    w = DestinationWorker(9, "end", fake_cmd("end", seconds=0.3), config=cfg, on_status=rec)
+    w.start()
+    await wait_for(lambda: w.status.restarts >= 1, within=10)
+    await wait_for(lambda: w.status.status == DestinationStatus.IDLE)
+    assert w.status.last_error == "input stream ended"
+    assert w.status.consecutive_failures == 0
+    assert w.status.next_retry_at is None
+    await asyncio.sleep(0.6)  # without a poke it does not restart by itself
+    assert w.status.status == DestinationStatus.IDLE
+    assert w.status.pid is None
+    w.poke()  # publisher is back
+    await wait_for(lambda: w.status.status == DestinationStatus.LIVE, within=10)
+    assert DestinationStatus.RETRYING not in rec.transitions()
+    await asyncio.wait_for(w.stop(), timeout=5)
+
+
+async def test_stop_while_waiting_for_input_returns_promptly() -> None:
+    cfg = WorkerConfig(input_ended_wait=60.0)
+    w = DestinationWorker(10, "end2", fake_cmd("end", seconds=0.2), config=cfg)
+    w.start()
+    await wait_for(
+        lambda: w.status.status == DestinationStatus.IDLE and w.status.restarts >= 1, within=10
+    )
+    await asyncio.wait_for(w.stop(), timeout=3)
+    assert not w.running
+
+
+async def test_poke_does_not_shortcut_failure_backoff() -> None:
+    cfg = WorkerConfig(backoff_base=30.0, backoff_max=60.0)
+    w = DestinationWorker(11, "failing", fake_cmd("fail"), config=cfg)
+    w.start()
+    await wait_for(lambda: w.status.status == DestinationStatus.RETRYING)
+    restarts = w.status.restarts
+    w.poke()
+    await asyncio.sleep(0.5)
+    assert w.status.restarts == restarts  # still backing off: pokes are for clean ends only
+    await asyncio.wait_for(w.stop(), timeout=3)

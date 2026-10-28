@@ -26,6 +26,7 @@ node_modules/
 
 # runtime data
 data/
+backups/
 *.db
 *.db-wal
 *.db-shm

@@ -9,7 +9,8 @@
 		respond 404
 	}
 
-	@backend path /api/* /ws/* /healthz
+	# Everything the API serves outside the SPA. /metrics is for Prometheus (auth required).
+	@backend path /api/* /ws/* /healthz /metrics
 	handle @backend {
 		reverse_proxy api:8000
 	}

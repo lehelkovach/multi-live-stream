@@ -4,6 +4,7 @@
 ok          print progress blocks forever (until SIGTERM)
 fail        write an error to stderr and exit 1 immediately
 exit-after  run normally for --seconds then exit 1 (simulates a dropped connection)
+end         run normally for --seconds then exit 0 (the input stream ended)
 stall       print one progress block, then stay silent forever
 slow        sleep --seconds before the first progress block (tests "starting")
 """
@@ -51,6 +52,8 @@ def main() -> int:
         sys.stdout.flush()
         if args.mode == "stall":
             signal.pause()
+        if args.mode == "end" and time.monotonic() - start >= args.seconds:
+            return 0
         if args.mode == "exit-after" and time.monotonic() - start >= args.seconds:
             print("av_interleaved_write_frame(): Broken pipe", file=sys.stderr, flush=True)
             return 1

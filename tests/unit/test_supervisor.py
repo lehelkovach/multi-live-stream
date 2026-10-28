@@ -68,11 +68,15 @@ class FakeWorker:
         self.on_status, self.secrets = on_status, secrets
         self.started = False
         self.stopped = False
+        self.pokes = 0
         self.status = WorkerStatus(id=dest_id, name=name)
         FakeWorker.instances.append(self)
 
     def start(self) -> None:
         self.started = True
+
+    def poke(self) -> None:
+        self.pokes += 1
 
     async def stop(self) -> None:
         self.stopped = True
@@ -338,3 +342,22 @@ async def test_shutdown_stops_everything(
     assert s.workers == {}
     assert all(w.stopped for w in FakeWorker.instances)
     assert read_status(redis_sync, d1)["status"] == "idle"
+
+
+async def test_workers_are_poked_only_while_input_is_live(
+    sup: tuple[Supervisor, FakeMediaMTX], engine: Engine, box: SecretBox
+) -> None:
+    s, mtx = sup
+    d1 = add_dest(engine, box, "yt")
+    mtx.live = True
+    await s.reconcile()
+    worker = s.workers[d1]
+    assert isinstance(worker, FakeWorker)
+    await s.reconcile()
+    assert worker.pokes == 2
+    with Session(engine) as session:
+        set_relay_enabled(session, False)
+        session.commit()
+    await s.reconcile()  # relay off: worker stopped, nothing poked
+    assert worker.pokes == 2
+    assert worker.stopped

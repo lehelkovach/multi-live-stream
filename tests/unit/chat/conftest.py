@@ -44,6 +44,8 @@ def chat_settings(settings: Settings) -> Settings:
             "facebook_app_secret": settings.facebook_app_secret.__class__("fb-secret"),
             "allow_fake_chat": True,
             "domain": "stream.example.com",
+            # a budget big enough that quota pacing never slows the adapter tests down
+            "youtube_daily_quota": 100_000_000,
         }
     )
 

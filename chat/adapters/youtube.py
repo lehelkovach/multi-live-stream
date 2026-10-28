@@ -16,7 +16,7 @@ from __future__ import annotations
 import asyncio
 import json
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from datetime import UTC, datetime
 from typing import Any
 
@@ -96,16 +96,21 @@ def normalize_item(
 
 
 class QuotaBudget:
-    """Tracks units spent today (UTC) in Redis; suggests a polling interval that
-    spreads the remaining budget over the rest of the day."""
+    """Tracks units spent today (UTC) in Redis and paces polling to the budget.
 
-    def __init__(self, ctx: AdapterContext) -> None:
+    The pacing target is: whatever is left of today's budget must still cover
+    ``OMNI_YOUTUBE_CHAT_HOURS`` more hours of polling (or the rest of the UTC day,
+    if that is shorter). It is re-evaluated before every poll, so a stream that
+    runs longer than planned slows down gradually instead of hitting the quota.
+    """
+
+    def __init__(self, ctx: AdapterContext, clock: Callable[[], datetime] | None = None) -> None:
         self.ctx = ctx
         self._local = 0
+        self._clock = clock or (lambda: datetime.now(UTC))
 
-    @staticmethod
-    def _day() -> str:
-        return datetime.now(UTC).strftime("%Y%m%d")
+    def _day(self) -> str:
+        return self._clock().strftime("%Y%m%d")
 
     async def spend(self, units: int) -> None:
         self._local += units
@@ -128,17 +133,17 @@ class QuotaBudget:
             return self._local
 
     async def min_interval(self) -> float:
-        """Seconds between list calls so the remaining budget lasts until midnight UTC."""
-        budget = int(
-            self.ctx.settings.youtube_daily_quota * self.ctx.settings.youtube_chat_quota_share
-        )
+        """Smallest allowed gap (seconds) between ``liveChatMessages.list`` calls."""
+        settings = self.ctx.settings
+        budget = int(settings.youtube_daily_quota * settings.youtube_chat_quota_share)
         remaining = budget - await self.spent()
         if remaining <= 0:
             return MAX_INTERVAL * 10  # 5 minutes: effectively paused until the quota resets
-        now = datetime.now(UTC)
-        seconds_left = max(60.0, 86400 - (now.hour * 3600 + now.minute * 60 + now.second))
+        now = self._clock()
+        seconds_left_today = max(60.0, 86400.0 - (now.hour * 3600 + now.minute * 60 + now.second))
+        horizon = min(seconds_left_today, max(settings.youtube_chat_hours, 0.1) * 3600.0)
         calls_left = remaining / COST_LIST
-        return max(MIN_INTERVAL, seconds_left / max(calls_left, 1.0))
+        return max(MIN_INTERVAL, horizon / max(calls_left, 1.0))
 
 
 class YouTubeAdapter:

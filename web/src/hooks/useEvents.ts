@@ -17,9 +17,18 @@ interface EventsState {
   outgoing: Outgoing[]; // recent sends with per-target delivery status (newest last)
   conn: ConnState;
   error: string | null;
+  // Socket events that can arrive before the item they describe is in state (an
+  // account created a moment ago, a send whose POST response is still in flight).
+  // Kept in state, not refs, so every updater stays pure and order-independent.
+  pendingAccounts: Record<number, AccountPatch>;
+  pendingOutgoing: Record<number, OutgoingEvent[]>;
 }
 
+type AccountPatch = Pick<ChatAccount, "status" | "last_error" | "runtime">;
+type OutgoingEvent = { id: number; account_id: number | null; done?: boolean } & Partial<Delivery>;
+
 const MAX_LIVE_CHAT = 500;
+const MAX_PENDING_OUTGOING = 50; // events for sends made from another device are never claimed
 
 type Snapshot = { type: "snapshot"; destinations: Destination[]; relay: RelayState };
 type DestEvent = { type: "destination.status" | "destination.stats"; id: number } & Partial<Runtime>;
@@ -64,10 +73,24 @@ function newest<
   });
 }
 
-function applyOutgoingEvent(
-  o: Outgoing,
-  oe: { id: number; account_id: number | null; done?: boolean } & Partial<Delivery>,
-): Outgoing {
+/** Merge account status events that arrived before the account list knew the id. */
+function withPendingAccounts(
+  accounts: ChatAccount[],
+  pending: Record<number, AccountPatch>,
+): { accounts: ChatAccount[]; pending: Record<number, AccountPatch> } {
+  if (Object.keys(pending).length === 0) return { accounts, pending };
+  const rest = { ...pending };
+  const merged = accounts.map((a) => {
+    const p = rest[a.id];
+    if (!p) return a;
+    delete rest[a.id];
+    if (a.runtime && p.runtime && stamp(a.runtime.updated_at) >= stamp(p.runtime.updated_at)) return a;
+    return { ...a, status: a.enabled ? p.status : "disabled", last_error: p.last_error, runtime: p.runtime };
+  });
+  return { accounts: merged, pending: rest };
+}
+
+function applyOutgoingEvent(o: Outgoing, oe: OutgoingEvent): Outgoing {
   if (oe.account_id == null) {
     return { ...o, status: oe.status ?? o.status, finished_at: oe.done ? new Date().toISOString() : o.finished_at };
   }
@@ -99,39 +122,35 @@ function mergeRuntime(dest: Destination, evt: DestEvent): Destination {
 }
 
 export function useEvents(enabled: boolean) {
-  const [state, setState] = useState<EventsState>({ destinations: [], relay: null, accounts: [], chat: [], outgoing: [], conn: "connecting", error: null });
+  const [state, setState] = useState<EventsState>({
+    destinations: [],
+    relay: null,
+    accounts: [],
+    chat: [],
+    outgoing: [],
+    conn: "connecting",
+    error: null,
+    pendingAccounts: {},
+    pendingOutgoing: {},
+  });
   const wsRef = useRef<WebSocket | null>(null);
   const attemptRef = useRef(0);
   const stoppedRef = useRef(false);
-  // status events for accounts the list does not contain yet (created a moment ago)
-  const pendingAccountRef = useRef(new Map<number, Pick<ChatAccount, "status" | "last_error" | "runtime">>());
-
-  type OutgoingEvent = { id: number; account_id: number | null; done?: boolean } & Partial<Delivery>;
-  const pendingOutgoingRef = useRef(new Map<number, OutgoingEvent[]>());
-
-  const applyPending = useCallback((accounts: ChatAccount[]): ChatAccount[] => {
-    const pending = pendingAccountRef.current;
-    if (pending.size === 0) return accounts;
-    return accounts.map((a) => {
-      const p = pending.get(a.id);
-      if (!p) return a;
-      pending.delete(a.id);
-      if (a.runtime && p.runtime && stamp(a.runtime.updated_at) >= stamp(p.runtime.updated_at)) return a;
-      return { ...a, status: a.enabled ? p.status : "disabled", last_error: p.last_error, runtime: p.runtime };
-    });
-  }, []);
 
   const refresh = useCallback(async () => {
-    // (applyPending is stable; declared above)
     try {
       const [destinations, relay, accounts] = await Promise.all([destApi.list(), relayApi.state(), chatApi.accounts()]);
-      setState((s) => ({
-        ...s,
-        destinations: newest(destinations, s.destinations),
-        relay,
-        accounts: applyPending(newest(accounts, s.accounts)),
-        error: null,
-      }));
+      setState((s) => {
+        const merged = withPendingAccounts(newest(accounts, s.accounts), s.pendingAccounts);
+        return {
+          ...s,
+          destinations: newest(destinations, s.destinations),
+          relay,
+          accounts: merged.accounts,
+          pendingAccounts: merged.pending,
+          error: null,
+        };
+      });
     } catch (err) {
       setState((s) => ({ ...s, error: err instanceof Error ? err.message : String(err) }));
     }
@@ -140,7 +159,10 @@ export function useEvents(enabled: boolean) {
   const refreshAccounts = useCallback(async () => {
     try {
       const accounts = await chatApi.accounts();
-      setState((s) => ({ ...s, accounts: applyPending(newest(accounts, s.accounts)) }));
+      setState((s) => {
+        const merged = withPendingAccounts(newest(accounts, s.accounts), s.pendingAccounts);
+        return { ...s, accounts: merged.accounts, pendingAccounts: merged.pending };
+      });
     } catch {
       /* keep previous */
     }
@@ -207,27 +229,20 @@ export function useEvents(enabled: boolean) {
             break;
           case "chat.account.status": {
             const ae = evt as Extract<AnyEvent, { type: "chat.account.status" }>;
+            const patch: AccountPatch = {
+              status: ae.status,
+              last_error: ae.last_error,
+              runtime: { status: ae.status, detail: ae.detail, last_error: ae.last_error, updated_at: ae.updated_at ?? Date.now() / 1000 },
+            };
             setState((s) => {
               if (!s.accounts.some((a) => a.id === ae.id)) {
-                pendingAccountRef.current.set(ae.id, {
-                  status: ae.status,
-                  last_error: ae.last_error,
-                  runtime: { status: ae.status, detail: ae.detail, last_error: ae.last_error, updated_at: ae.updated_at ?? Date.now() / 1000 },
-                });
-                return s;
+                return { ...s, pendingAccounts: { ...s.pendingAccounts, [ae.id]: patch } };
               }
               return {
-              ...s,
-              accounts: s.accounts.map((a) =>
-                a.id === ae.id
-                  ? {
-                      ...a,
-                      status: a.enabled ? ae.status : "disabled",
-                      last_error: ae.last_error,
-                      runtime: { status: ae.status, detail: ae.detail, last_error: ae.last_error, updated_at: ae.updated_at ?? Date.now() / 1000 },
-                    }
-                  : a,
-              ),
+                ...s,
+                accounts: s.accounts.map((a) =>
+                  a.id === ae.id ? { ...a, ...patch, status: a.enabled ? patch.status : "disabled" } : a,
+                ),
               };
             });
             break;
@@ -236,11 +251,11 @@ export function useEvents(enabled: boolean) {
             const oe = evt as Extract<AnyEvent, { type: "chat.outgoing" }>;
             setState((s) => {
               if (!s.outgoing.some((o) => o.id === oe.id)) {
-                // the manager can finish before the browser has processed the POST response
-                const list = pendingOutgoingRef.current.get(oe.id) ?? [];
-                list.push(oe);
-                pendingOutgoingRef.current.set(oe.id, list);
-                return s;
+                // the chat service can finish before the browser has handled the POST response
+                const pending = { ...s.pendingOutgoing, [oe.id]: [...(s.pendingOutgoing[oe.id] ?? []), oe] };
+                const ids = Object.keys(pending).map(Number).sort((a, b) => a - b);
+                for (const stale of ids.slice(0, Math.max(0, ids.length - MAX_PENDING_OUTGOING))) delete pending[stale];
+                return { ...s, pendingOutgoing: pending };
               }
               return { ...s, outgoing: s.outgoing.map((o) => (o.id === oe.id ? applyOutgoingEvent(o, oe) : o)) };
             });
@@ -283,13 +298,15 @@ export function useEvents(enabled: boolean) {
     };
   }, [enabled, refresh, refreshAccounts]);
 
-
+  /** Register a send we just made; applies any of its events that arrived first. */
   const trackOutgoing = useCallback((incoming: Outgoing) => {
-    const buffered = pendingOutgoingRef.current.get(incoming.id) ?? [];
-    pendingOutgoingRef.current.delete(incoming.id);
-    const o = buffered.reduce(applyOutgoingEvent, incoming);
-    setState((s) => ({ ...s, outgoing: [...s.outgoing.filter((x) => x.id !== o.id), o].slice(-50) }));
+    setState((s) => {
+      const { [incoming.id]: early = [], ...rest } = s.pendingOutgoing;
+      const o = early.reduce(applyOutgoingEvent, incoming);
+      return { ...s, outgoing: [...s.outgoing.filter((x) => x.id !== o.id), o].slice(-50), pendingOutgoing: rest };
+    });
   }, []);
 
-  return { ...state, refresh, refreshAccounts, trackOutgoing };
+  const { pendingAccounts: _pa, pendingOutgoing: _po, ...visible } = state;
+  return { ...visible, refresh, refreshAccounts, trackOutgoing };
 }

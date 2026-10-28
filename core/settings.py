@@ -79,6 +79,7 @@ class Settings(BaseSettings):
     chat_poll_interval: float = 5.0  # seconds between manager reconcile passes
     youtube_daily_quota: int = 10_000  # units/day granted to the Google project
     youtube_chat_quota_share: float = 0.8  # fraction of the daily quota chat polling may use
+    youtube_chat_hours: float = 3.0  # hours/day of YouTube chat the budget must cover
     youtube_stream_mode: bool = False  # experimental: liveChatMessages.streamList
     # Outgoing chat rate limits per platform: sustained messages/second and burst size.
     # Conservative defaults from the platform docs (see docs/platforms.md); JSON in .env.

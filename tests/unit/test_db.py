@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import threading
 from pathlib import Path
+from typing import Any
 
 import pytest
 from sqlalchemy.exc import OperationalError
@@ -61,3 +62,21 @@ def test_concurrent_init_db_on_fresh_file(tmp_path: Path) -> None:
     for t in threads:
         t.join()
     assert errors == []
+
+
+def test_sqlite_writable_detects_read_only_files(tmp_path: Path) -> None:
+    from types import SimpleNamespace
+
+    path = tmp_path / "probe.db"
+    rw = core_db.make_engine(f"sqlite:///{path}")
+    core_db.init_db(rw)
+    assert core_db.sqlite_writable(rw) is True
+    with Session(rw) as session:  # the probe leaves no trace and does not block writers
+        session.add(Destination(name="still writable", rtmp_url="rtmp://a/b"))
+        session.commit()
+    rw.dispose()
+    # what SQLite does when the app user cannot write the file: open it read-only
+    ro = core_db.make_engine(f"sqlite:///file:{path}?mode=ro&uri=true")
+    assert core_db.sqlite_writable(ro) is False
+    not_sqlite: Any = SimpleNamespace(dialect=SimpleNamespace(name="postgresql"))
+    assert core_db.sqlite_writable(not_sqlite) is None

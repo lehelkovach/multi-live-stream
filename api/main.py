@@ -15,21 +15,37 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import httpx
-from fastapi import FastAPI
+from fastapi import APIRouter, FastAPI
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from api.auth import LoginRateLimiter, PasswordVerifier, SessionSigner
 from api.routers import auth, chat, destinations, health, ingest, metrics, relay, ws
+from api.routers.health import READ_ONLY_HINT
 from chat.kick_webhook import PublicKeyCache
 from core import __version__
 from core.crypto import SecretBox
-from core.db import init_db, make_engine
+from core.db import init_db, make_engine, sqlite_writable
 from core.logging import configure_logging, get_logger
 from core.redis import make_redis
 from core.settings import Settings, get_settings
 
 log = get_logger(__name__)
+
+# Every router the app serves (the edge config test in tests/unit/test_deploy_config.py
+# checks that Caddy proxies each of their top-level paths to the API).
+ROUTERS: tuple[APIRouter, ...] = (
+    health.router,
+    auth.router,
+    ingest.router,
+    destinations.router,
+    relay.router,
+    chat.protected,
+    chat.router,
+    chat.webhooks,
+    ws.router,
+    metrics.router,
+)
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -47,6 +63,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.login_limiter = LoginRateLimiter()
         app.state.engine = make_engine(settings.database_url)
         init_db(app.state.engine)
+        try:
+            if sqlite_writable(app.state.engine) is False:
+                log.error("db.read_only", database=settings.database_url, hint=READ_ONLY_HINT)
+        except Exception as exc:  # a diagnostic must never block startup
+            log.warning("db.write_probe_failed", error=str(exc))
         app.state.redis = make_redis(settings.redis_url)
         app.state.http = httpx.AsyncClient(headers={"User-Agent": "OmniStream/0.1 (+api)"})
         app.state.kick_public_key = PublicKeyCache()
@@ -67,16 +88,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         openapi_url="/api/openapi.json",
         redoc_url=None,
     )
-    app.include_router(health.router)
-    app.include_router(auth.router)
-    app.include_router(ingest.router)
-    app.include_router(destinations.router)
-    app.include_router(relay.router)
-    app.include_router(chat.protected)
-    app.include_router(chat.router)
-    app.include_router(chat.webhooks)
-    app.include_router(ws.router)
-    app.include_router(metrics.router)
+    for router in ROUTERS:
+        app.include_router(router)
     _mount_web(app, Path(settings.web_dist_dir))
     return app
 

@@ -28,7 +28,7 @@ built.
 └──────────────┬───────────────────────┘
                │
 ┌── caddy (edge, auto-HTTPS) ──┐  ┌── web (React SPA, static) ──┐
-│  /api /ws /healthz -> api    │─►│  mobile-first dashboard      │
+│  /api /ws /healthz /metrics  │─►│  mobile-first dashboard      │
 │  everything else   -> web    │  └──────────────────────────────┘
 │  /internal/*       -> 404    │
 └──────────────────────────────┘
@@ -122,9 +122,13 @@ platform never needs a migration.
    backoff (1 s, 2 s, 4 s ... capped at 60 s, +20% jitter). After
    `OMNI_RELAY_ERROR_AFTER_FAILURES` (5) consecutive quick failures the status is
    `error` but it keeps retrying at the cap; a run longer than
-   `OMNI_RELAY_HEALTHY_AFTER` (30 s) resets the counter. Children get
-   `PR_SET_PDEATHSIG`, so a crashed relay can never leave an orphan ffmpeg pushing
-   while its replacement starts another.
+   `OMNI_RELAY_HEALTHY_AFTER` (30 s) resets the counter. A clean exit (code 0,
+   which is what ffmpeg does when the publisher disconnects) is not a failure: the
+   worker records "input stream ended", goes `idle` and waits for the supervisor,
+   which stops it if the input is offline or pokes it on its next pass if the
+   input is live again (an OBS reconnect resumes without a blind retry). Children
+   get `PR_SET_PDEATHSIG`, so a crashed relay can never leave an orphan ffmpeg
+   pushing while its replacement starts another.
 4. The API merges the DB row with the Redis blob (`GET /api/v1/destinations`),
    exposes the global switch and ingest state (`/api/v1/relay`), and the OBS
    settings (`/api/v1/relay/ingest`). Status changes also persist to
@@ -231,7 +235,9 @@ reload keeping the session, delete, sign out.
   cached, re-fetched once on failure), dedupes by message id (Redis SET NX, 1 h)
   and re-publishes the payload; the Kick adapter filters by broadcaster id.
 * **YouTube quota**: polling costs 5 units; the adapter keeps a per-day counter in
-  Redis and paces itself to the configured share of the daily quota.
+  Redis and, before every poll, makes sure the rest of today's share still covers
+  `OMNI_YOUTUBE_CHAT_HOURS` (default 3) more hours of polling (or the rest of the
+  UTC day if shorter): about one poll every 7 s on a fresh 10,000-unit project.
 * **History**: `GET /api/v1/chat/messages?limit=&before=&platform=`; the Chat tab
   merges the last 200 with live socket messages and dedupes by id.
 
@@ -265,8 +271,15 @@ of our own message arrive through the normal read path as `is_own`.
   while the services run) into `/data/backups`, keeping `OMNI_BACKUP_KEEP`
   snapshots; `make backup` copies them to `./backups/` on the host. The `.env`
   file is part of the backup set because `OMNI_SECRET_KEY` decrypts stored
-  credentials. Restore = stop the stack, copy a snapshot over
-  `/data/omnistream.db` in the `app_data` volume, start.
+  credentials. Backups are written in rollback-journal mode, so a single file is
+  complete and readable from a read-only mount.
+* **Restore**: `make restore FILE=...` stops api/relay/chat and runs
+  `omnistream restore` as the app user: integrity + schema check, the current
+  database is copied to `prerestore-*.db`, the backup is written next to the
+  target and renamed into place (so ownership is right even if the old file was
+  root-owned), stale `-wal`/`-shm` files are removed, and the services restart
+  even if the restore fails. `/api/v1/health` reports a database the app user
+  cannot write (and the API logs `db.read_only` at startup).
 * **Retention**: `omnistream prune` deletes chat history and outgoing messages
   older than `OMNI_CHAT_RETENTION_DAYS`.
 * **Network**: see `deploy/README.md` for the OCI security list + host firewall

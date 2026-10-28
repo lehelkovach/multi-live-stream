@@ -3,6 +3,7 @@ from __future__ import annotations
 import time
 
 import fakeredis
+import pytest
 from fastapi.testclient import TestClient
 
 from core.redis import KEY_RELAY_HEARTBEAT
@@ -40,3 +41,15 @@ def test_relay_heartbeat_flips_relay_ok(
     redis_sync.set(KEY_RELAY_HEARTBEAT, str(time.time() - 120))
     body = auth_client.get("/api/v1/health").json()
     assert body["components"]["relay"]["ok"] is False
+
+
+def test_detailed_health_flags_read_only_database(
+    auth_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from api.routers import health
+
+    monkeypatch.setattr(health, "sqlite_writable", lambda engine: False)
+    body = auth_client.get("/api/v1/health").json()
+    assert body["components"]["db"]["ok"] is False
+    assert "read-only" in body["components"]["db"]["detail"]
+    assert "make restore" in body["components"]["db"]["detail"]

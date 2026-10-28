@@ -150,8 +150,19 @@ def test_relay_fans_out_isolates_failures_and_follows_toggles(stack: Stack) -> N
         lambda: not stack.dest.ready("one/k1") and not stack.dest.ready("two/k2"),
         what="outputs stop when ingest ends",
     )
-    wait_until(lambda: _status(client, d1)["status"] == "idle", what="idle after offline")
-    assert client.get("/api/v1/relay").json()["ingest"]["live"] is False
+    # the worker notices first ("input stream ended"); the supervisor confirms on its next poll
+    wait_until(
+        lambda: client.get("/api/v1/relay").json()["ingest"]["live"] is False,
+        what="ingest offline",
+    )
+    wait_until(
+        lambda: (_status(client, d1)["runtime"] or {}).get("detail") == "no input stream",
+        what="idle with 'no input stream'",
+    )
+    ended = _status(client, d1)
+    assert ended["status"] == "idle"
+    # a clean end of input is not reported as a failure, and no blind retry hit a 404
+    assert ended["last_error"] in (None, "input stream ended"), ended["last_error"]
 
     for dest_id in (d1, d2):
         assert client.delete(f"/api/v1/destinations/{dest_id}").status_code == 204

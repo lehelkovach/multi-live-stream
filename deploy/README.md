@@ -72,20 +72,24 @@ Schedule it on the host (`crontab -e`):
 Copy `backups/` **and `.env`** off the VM (OCI Object Storage, rclone, or scp);
 the Fernet key in `.env` is required to read the stored stream keys and tokens.
 
-Restore:
+Restore (stops api/relay/chat, validates the file, keeps a copy of the current
+database in `/data/backups/prerestore-*.db`, restarts):
 
 ```bash
-make down
-docker run --rm -v omnistream_app_data:/data -v "$PWD/backups:/b" alpine \
-  sh -c 'cp /b/omnistream-YYYYmmdd-HHMMSS.db /data/omnistream.db && rm -f /data/omnistream.db-wal /data/omnistream.db-shm'
-make up
+make restore FILE=backups/omnistream-YYYYmmdd-HHMMSS.db
 ```
+
+Do not copy a backup into the volume by hand as root: SQLite then opens the
+root-owned file read-only for the app user and every change fails with
+"attempt to write a readonly database" (the detailed health report at
+`/api/v1/health` flags this). If it already happened, `make restore` with the
+same file fixes the ownership.
 
 Chat history retention: `make prune` (default 30 days, `OMNI_CHAT_RETENTION_DAYS`).
 
 ## Metrics
 
-`https://<domain>/metrics` serves Prometheus text format. From a scraper, set
+`https://<domain>/metrics` serves Prometheus text format (Caddy proxies it to the API). From a scraper, set
 `OMNI_METRICS_TOKEN` in `.env` and use `Authorization: Bearer <token>`; from a
 browser the dashboard session is enough. Useful alerts:
 

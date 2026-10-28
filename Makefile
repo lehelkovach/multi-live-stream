@@ -11,7 +11,7 @@ S       ?=            # service name for logs/restart, e.g. make logs S=api
 
 .PHONY: help init-env up down restart build ps logs venv test test-integration test-e2e lint fmt \
         web-install web-build web-lint secret hash-password check-config compose-config \
-        dev-api dev-web clean backup prune
+        dev-api dev-web clean backup restore prune
 
 help: ## show this help
 	@grep -hE '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
@@ -97,6 +97,16 @@ backup: ## snapshot the database inside the api container and copy it to ./backu
 	$(COMPOSE) exec -T api omnistream backup
 	mkdir -p backups && $(COMPOSE) cp api:/data/backups/. ./backups/
 	@echo "copied to ./backups/ - keep a copy of .env with it (encryption key)"
+
+restore: ## restore a backup: make restore FILE=backups/omnistream-YYYYmmdd-HHMMSS.db
+	@test -n "$(FILE)" || { echo "usage: make restore FILE=backups/omnistream-YYYYmmdd-HHMMSS.db"; exit 2; }
+	@test -f "$(FILE)" || { echo "no such file: $(FILE)"; exit 2; }
+	$(COMPOSE) stop api relay chat
+	@status=0; \
+	$(COMPOSE) run --rm --no-deps -T -v "$(abspath $(FILE)):/restore/backup.db:ro" \
+		api omnistream restore /restore/backup.db --yes || status=$$?; \
+	$(COMPOSE) start api relay chat; \
+	exit $$status
 
 prune: ## delete chat history older than OMNI_CHAT_RETENTION_DAYS (default 30)
 	$(COMPOSE) exec -T api omnistream prune

@@ -213,6 +213,11 @@ class Supervisor:
             self.workers[dest_id] = worker
             log.info("relay.start_worker", dest_id=dest_id, dest=dest.name, platform=dest.platform)
 
+        # input is live: workers waiting after a clean end of input restart now
+        if live and relay_on:
+            for worker in self.workers.values():
+                worker.poke()
+
         # status for everything without a worker
         known_ids = {d.id for d in rows if d.id is not None}
         for dest in rows:

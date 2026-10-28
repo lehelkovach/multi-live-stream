@@ -59,6 +59,36 @@ def make_engine(url: str, *, echo: bool = False) -> Engine:
     return engine
 
 
+def sqlite_writable(engine: Engine) -> bool | None:
+    """True/False for SQLite (can we write the file?), None for other databases.
+
+    SQLite silently opens a file it cannot write in read-only mode, and the failure
+    only shows on the first write ("attempt to write a readonly database"), e.g.
+    after a backup was restored as root into the volume. Re-writing the header's
+    ``user_version`` inside a rolled-back transaction surfaces that without
+    changing anything.
+    """
+    if engine.dialect.name != "sqlite":
+        return None
+    raw = engine.raw_connection()
+    try:
+        cur = raw.cursor()
+        cur.execute("SAVEPOINT omni_write_probe")
+        try:
+            version = cur.execute("PRAGMA user_version").fetchone()[0]
+            cur.execute(f"PRAGMA user_version = {int(version)}")
+        except Exception as exc:
+            if "readonly" in str(exc).lower() or "read-only" in str(exc).lower():
+                return False
+            raise
+        finally:
+            cur.execute("ROLLBACK TO omni_write_probe")
+            cur.execute("RELEASE omni_write_probe")
+        return True
+    finally:
+        raw.close()
+
+
 def init_db(engine: Engine, *, attempts: int = 5) -> None:
     """Create any missing tables. (Alembic migrations are a Phase 6 item.)
 

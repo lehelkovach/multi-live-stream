@@ -89,6 +89,9 @@ class FakeWorker:
     def start(self) -> None:
         self._task = asyncio.create_task(self._run())
 
+    def poke(self) -> None:
+        return None
+
     async def stop(self) -> None:
         if self._task:
             self._task.cancel()

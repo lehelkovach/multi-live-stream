@@ -16,11 +16,16 @@ from sqlalchemy import text
 from api.deps import RedisDep, SettingsDep, UserDep
 from api.schemas import ComponentHealth, HealthOut, HealthzOut
 from core import __version__
+from core.db import sqlite_writable
 from core.redis import KEY_RELAY_HEARTBEAT
 
 router = APIRouter()
 
 _TIMEOUT = 2.0
+READ_ONLY_HINT = (
+    "database is read-only: the file in the app_data volume is not writable by the app "
+    "user (uid 10001); restore backups with `make restore`"
+)
 
 
 @router.get("/healthz", response_model=HealthzOut, tags=["health"])
@@ -31,15 +36,20 @@ async def healthz() -> HealthzOut:
 async def _check_db(request: Request) -> ComponentHealth:
     start = time.perf_counter()
 
-    def _ping() -> None:
-        with request.app.state.engine.connect() as conn:
+    def _ping() -> bool | None:
+        engine = request.app.state.engine
+        with engine.connect() as conn:
             conn.execute(text("SELECT 1"))
+        return sqlite_writable(engine)
 
     try:
-        await asyncio.wait_for(asyncio.to_thread(_ping), _TIMEOUT)
+        writable = await asyncio.wait_for(asyncio.to_thread(_ping), _TIMEOUT)
     except Exception as exc:
         return ComponentHealth(ok=False, detail=f"{type(exc).__name__}: {exc}"[:200])
-    return ComponentHealth(ok=True, latency_ms=round((time.perf_counter() - start) * 1000, 2))
+    latency = round((time.perf_counter() - start) * 1000, 2)
+    if writable is False:
+        return ComponentHealth(ok=False, detail=READ_ONLY_HINT, latency_ms=latency)
+    return ComponentHealth(ok=True, latency_ms=latency)
 
 
 async def _check_redis(redis: RedisDep) -> tuple[ComponentHealth, ComponentHealth]:

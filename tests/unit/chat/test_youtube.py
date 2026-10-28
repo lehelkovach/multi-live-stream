@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import Callable
+from datetime import UTC, datetime
 from typing import Any
 
 import httpx
@@ -200,20 +201,24 @@ async def test_send(chat_settings: Settings) -> None:
 
 
 async def test_quota_budget_interval(chat_settings: Settings) -> None:
-    ctx = make_ctx(
-        chat_settings.model_copy(
-            update={"youtube_daily_quota": 100, "youtube_chat_quota_share": 1.0}
-        ),
-        "youtube",
-        make_handler([LIST]),
+    """Default project quota (10k units, 80% for chat, 3 h/day): pacing is clock-dependent."""
+    settings = chat_settings.model_copy(
+        update={
+            "youtube_daily_quota": 10_000,
+            "youtube_chat_quota_share": 0.8,
+            "youtube_chat_hours": 3.0,
+        }
     )
-    budget = QuotaBudget(ctx)  # no redis => local accounting
-    assert (
-        await budget.min_interval() == pytest.approx(yt.MIN_INTERVAL)
-        or await budget.min_interval() >= yt.MIN_INTERVAL
-    )
-    await budget.spend(100)
-    assert await budget.min_interval() >= yt.MAX_INTERVAL  # exhausted => long pause
+    ctx = make_ctx(settings, "youtube", make_handler([LIST]))
+    afternoon = QuotaBudget(ctx, clock=lambda: datetime(2026, 10, 28, 14, 0, tzinfo=UTC))
+    # 8000 units = 1600 list calls to cover 3 h -> one call every 6.75 s
+    assert await afternoon.min_interval() == pytest.approx(3 * 3600 / 1600)
+    late = QuotaBudget(ctx, clock=lambda: datetime(2026, 10, 28, 23, 30, tzinfo=UTC))
+    assert await late.min_interval() == yt.MIN_INTERVAL  # 30 min left: poll at full speed
+    await afternoon.spend(4000)  # half the budget gone -> twice the gap
+    assert await afternoon.min_interval() == pytest.approx(3 * 3600 / 800)
+    await afternoon.spend(4000)  # exhausted -> effectively paused until the reset
+    assert await afternoon.min_interval() >= yt.MAX_INTERVAL
 
 
 async def test_stream_mode_parses_streamed_documents(chat_settings: Settings) -> None:

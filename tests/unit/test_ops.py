@@ -203,3 +203,75 @@ def test_cli_backup_and_prune(
         remaining = [m.id for m in session.exec(__import__("sqlmodel").select(ChatMessage)).all()]
     assert remaining == ["fake:new"]
     get_settings.cache_clear()
+
+
+def test_cli_restore(
+    settings: Settings,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from sqlmodel import select
+
+    from core.db import init_db, make_engine
+    from core.models import Destination
+    from core.settings import get_settings
+
+    db_path = Path(settings.database_url.removeprefix("sqlite:///"))
+    engine = make_engine(settings.database_url)
+    init_db(engine)
+    with Session(engine) as session:
+        session.add(Destination(name="original", rtmp_url="rtmp://a/b"))
+        session.commit()
+    backups = tmp_path / "bk"
+    monkeypatch.setenv("OMNI_SECRET_KEY", settings.secret_key.get_secret_value())
+    monkeypatch.setenv("OMNI_SESSION_SECRET", settings.session_secret.get_secret_value())
+    monkeypatch.setenv("OMNI_DATABASE_URL", settings.database_url)
+    monkeypatch.setenv("OMNI_BACKUP_DIR", str(backups))
+    get_settings.cache_clear()
+    assert cli.main(["backup"]) == 0
+    snapshot = next(backups.glob("omnistream-*.db"))
+    # backups are self-contained (rollback journal, not WAL): header bytes 18/19 == 1
+    assert snapshot.read_bytes()[18:20] == b"\x01\x01"
+
+    with Session(engine) as session:  # diverge from the snapshot
+        session.add(Destination(name="added later", rtmp_url="rtmp://c/d"))
+        session.commit()
+    engine.dispose()
+    capsys.readouterr()
+
+    assert cli.main(["restore", str(snapshot), "--yes"]) == 0
+    out = capsys.readouterr().out
+    assert "current database saved to" in out
+    assert "restored" in out
+    assert not Path(f"{db_path}-wal").exists()
+    pre = list(backups.glob("prerestore-omnistream-*.db"))
+    assert len(pre) == 1
+    assert sqlite3.connect(pre[0]).execute("select count(*) from destination").fetchone()[0] == 2
+    fresh = make_engine(settings.database_url)
+    with Session(fresh) as session:
+        assert [d.name for d in session.exec(select(Destination)).all()] == ["original"]
+    fresh.dispose()
+    # prerestore copies stay out of the backup rotation
+    assert cli.main(["backup", "--keep", "1"]) == 0
+    assert len(list(backups.glob("prerestore-*.db"))) == 1
+
+    # a copy taken from a live WAL database with a pending -wal next to it is refused
+    live_copy = tmp_path / "live-copy.db"
+    live_copy.write_bytes(snapshot.read_bytes())
+    Path(f"{live_copy}-wal").write_bytes(b"pending")
+    assert cli.main(["restore", str(live_copy), "--yes"]) == 2
+    assert "may be missing changes" in capsys.readouterr().err
+
+    garbage = tmp_path / "garbage.db"
+    garbage.write_bytes(b"not a database at all" * 100)
+    assert cli.main(["restore", str(garbage), "--yes"]) == 2
+    foreign = tmp_path / "foreign.db"
+    sqlite3.connect(foreign).execute("create table other(x)").connection.commit()
+    assert cli.main(["restore", str(foreign), "--yes"]) == 2
+    assert cli.main(["restore", str(tmp_path / "missing.db"), "--yes"]) == 2
+    err = capsys.readouterr().err
+    assert "not a SQLite database" in err
+    assert "not an OmniStream backup" in err
+    assert "does not exist" in err
+    get_settings.cache_clear()

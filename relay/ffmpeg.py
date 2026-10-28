@@ -75,13 +75,17 @@ def build_command(
     return cmd
 
 
-def redact(cmd: list[str], secrets: list[str]) -> str:
-    """Printable command with stream keys replaced, for logs."""
-    text = shlex.join(cmd)
+def redact_text(text: str, secrets: list[str]) -> str:
+    """``text`` with every secret (stream keys) replaced by ``<redacted>``."""
     for secret in secrets:
         if secret:
             text = text.replace(secret, "<redacted>")
     return text
+
+
+def redact(cmd: list[str], secrets: list[str]) -> str:
+    """Printable, shell-quoted command with stream keys replaced, for logs."""
+    return redact_text(shlex.join(cmd), secrets)
 
 
 @dataclass

@@ -152,3 +152,32 @@ async def test_manager_isolates_failures_and_follows_toggles(
             await task
     assert manager.runners == {}
     assert status_of(redis_sync, good).get("status") == "idle"
+
+
+async def test_fake_adapter_ids_are_unique_across_instances_with_the_same_account_id(
+    settings: Settings,
+) -> None:
+    """SQLite reuses deleted account ids; message ids (the store's dedupe key) must not repeat."""
+    import httpx
+
+    from chat.adapters.fake import FakeAdapter
+    from chat.base import AccountRef, AdapterContext
+
+    ids: list[str] = []
+    for _ in range(2):  # account 1 deleted and re-created
+        adapter = FakeAdapter(
+            AdapterContext(
+                account=AccountRef(
+                    id=1, platform="fake", channel_ref="", external_id="", display_name="d"
+                ),
+                credentials=Credentials(extra={"interval": 0.01, "limit": 3}),
+                settings=settings,
+                http=httpx.AsyncClient(),
+            )
+        )
+        await adapter.send("hi")  # queued: comes out first
+        stream = adapter.messages()
+        ids.extend([(await anext(stream)).id for _ in range(4)])  # 1 echo + 3 generated
+        await adapter.close()
+    assert len(ids) == 8
+    assert len(set(ids)) == 8, ids
