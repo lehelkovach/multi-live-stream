@@ -24,7 +24,9 @@ def _cmd_hash_password(args: argparse.Namespace) -> int:
     if len(password) < 8:
         print("password must be at least 8 characters", file=sys.stderr)
         return 2
-    print(hash_password(password))
+    hashed = hash_password(password)
+    # single quotes: Docker Compose would otherwise expand the $ signs in the hash
+    print(f"OMNI_ADMIN_PASSWORD_HASH='{hashed}'" if args.env else hashed)
     return 0
 
 
@@ -211,6 +213,7 @@ def main(argv: list[str] | None = None) -> int:
         "hash-password", help="print an argon2 hash for OMNI_ADMIN_PASSWORD_HASH"
     )
     p_hash.add_argument("--password", help="(insecure; prefer the prompt or stdin)")
+    p_hash.add_argument("--env", action="store_true", help="print a quoted line ready for .env")
     p_hash.set_defaults(func=_cmd_hash_password)
     p_secret = sub.add_parser("secret", help="print a random key (Fernet-compatible)")
     p_secret.set_defaults(func=_cmd_secret)

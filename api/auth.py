@@ -46,6 +46,15 @@ class PasswordVerifier:
         if not pw_hash:
             msg = "set OMNI_ADMIN_PASSWORD_HASH (make hash-password) or OMNI_ADMIN_PASSWORD"
             raise ValueError(msg)
+        if not pw_hash.startswith("$argon2"):
+            # Docker Compose expands $VARS in .env values: an unquoted (or double-quoted)
+            # argon2 hash arrives mangled and every login would silently fail.
+            msg = (
+                "OMNI_ADMIN_PASSWORD_HASH is not an argon2 hash (it should start with $argon2). "
+                "In .env, wrap it in single quotes: OMNI_ADMIN_PASSWORD_HASH='$argon2id$...' "
+                "(`make hash-password` prints the line ready to paste)"
+            )
+            raise ValueError(msg)
         return cls(settings.admin_username, pw_hash)
 
     def verify(self, username: str, password: str) -> bool:

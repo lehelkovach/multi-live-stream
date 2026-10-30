@@ -2,6 +2,20 @@
 
 One entry per completed phase (plus notable fixes). Newest first.
 
+## Oracle Cloud deployment tooling (2026-10-30)
+
+* `deploy/oci/provision.py`: creates (or reuses) a dedicated VCN, public subnet,
+  internet gateway, route and security list and an Ampere A1 VM through the OCI
+  API; `status --follow` reads bootstrap progress from the serial console, so
+  no SSH access is needed.
+* `deploy/oci/cloud-init.sh`: host firewall, Docker, clone, `.env` (admin password
+  injected only as an argon2 hash), `docker compose up -d --build`, health wait,
+  RTMP ingest smoke test, Let's Encrypt via `<ip>.sslip.io`.
+* Fixed: an argon2 hash pasted into `.env` without single quotes is mangled by
+  Docker Compose's `$` expansion, so the admin login always failed. The API now
+  refuses to start with a clear message, `make hash-password` prints a quoted
+  line ready to paste, and `.env.example` says so.
+
 ## Full-stack verification + fixes (2026-10-28)
 
 The real `docker compose up -d` stack was run end to end for the first time (in

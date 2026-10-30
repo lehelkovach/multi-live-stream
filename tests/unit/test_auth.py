@@ -101,3 +101,22 @@ def test_rate_limiter_window() -> None:
     assert rl.allow("ip", now=11)  # first attempt (t=0) fell out of the window
     rl.reset("ip")
     assert rl.allow("ip", now=12)
+
+
+def test_mangled_hash_is_rejected_with_a_quoting_hint() -> None:
+    """What Docker Compose makes of an unquoted '$argon2id$v=19$m=...' value in .env."""
+    base = {"secret_key": generate_key(), "session_secret": "x" * 32}
+    mangled = Settings(admin_password_hash="=19=65536,t=3,p=4", **base)  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="single quotes"):
+        PasswordVerifier.from_settings(mangled)
+
+
+def test_cli_hash_password_env_line(capsys: pytest.CaptureFixture[str]) -> None:
+    from api import cli
+
+    assert cli.main(["hash-password", "--password", "long-enough-pw", "--env"]) == 0
+    line = capsys.readouterr().out.strip()
+    assert line.startswith("OMNI_ADMIN_PASSWORD_HASH='$argon2id$")
+    assert line.endswith("'")
+    hashed = line.split("=", 1)[1].strip("'")
+    assert PasswordVerifier("admin", hashed).verify("admin", "long-enough-pw")

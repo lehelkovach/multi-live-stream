@@ -88,9 +88,9 @@ dev-web: web-install ## run the Vite dev server (proxies /api to :8000)
 secret: ## print a random key (Fernet-compatible) for .env
 	@python3 -c "import base64,secrets;print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())"
 
-hash-password: ## print an argon2 hash for OMNI_ADMIN_PASSWORD_HASH
-	@if command -v $(UV) >/dev/null 2>&1; then $(UV) run --frozen omnistream hash-password; \
-	else $(COMPOSE) run --rm --no-deps api omnistream hash-password; fi
+hash-password: ## print a ready-to-paste OMNI_ADMIN_PASSWORD_HASH='...' line for .env
+	@if command -v $(UV) >/dev/null 2>&1; then $(UV) run --frozen omnistream hash-password --env; \
+	else $(COMPOSE) run --rm --no-deps api omnistream hash-password --env; fi
 
 # ---------------------------------------------------------------- backups ----
 backup: ## snapshot the database inside the api container and copy it to ./backups/

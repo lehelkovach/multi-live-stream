@@ -1,5 +1,30 @@
 # Deploying on OCI Ampere A1 (arm64)
 
+## Automated deploy through the OCI API
+
+`deploy/oci/provision.py` does the whole thing from any machine with OCI API
+credentials (no SSH needed): a dedicated VCN, public subnet, internet gateway,
+route and security list (22, 80, 443 tcp; 443 udp; 1935 tcp and 8890 udp for
+ingest), then an Ampere A1 VM whose cloud-init (`deploy/oci/cloud-init.sh`)
+opens the host firewall, installs Docker, clones the repo, writes `.env`, runs
+`docker compose up -d --build` and smoke-tests RTMP ingest. Existing resources
+are reused by name, so re-running it is safe.
+
+```bash
+pip install oci argon2-cffi                      # or: uv pip install oci
+export OCI_TENANCY_ID=... OCI_USER_ID=... OCI_REGION_ID=... \
+       OCI_FINGERPRINT=... OCI_KEY_FILE=~/.oci/key.pem   # API signing key
+python deploy/oci/provision.py up --branch main  # prints IP, URL and the admin password once
+python deploy/oci/provision.py status --follow   # bootstrap progress, read from the serial console
+```
+
+Defaults: 1 OCPU / 6 GB (`--ocpus`, `--memory`; resize later with a reboot),
+50 GB boot volume, `https://<ip-with-dashes>.sslip.io` as the hostname so Caddy
+gets a real Let's Encrypt certificate without a domain (`--domain` for your
+own), ingest open to the internet but protected by the stream key
+(`--ingest-cidr 203.0.113.7/32` to restrict it). The admin password is only
+passed to the VM as an argon2 hash; the other secrets are generated on the VM.
+
 ## VM
 
 * Shape `VM.Standard.A1.Flex` (4 OCPU / 24 GB is in the Always Free tier), Ubuntu
