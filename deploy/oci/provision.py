@@ -7,8 +7,7 @@ VM whose cloud-init (deploy/oci/cloud-init.sh) installs Docker, clones this
 repository and runs `docker compose up -d --build`. Nothing outside the new
 VCN is touched.
 
-Requirements: `pip install oci argon2-cffi` (or run it from the project venv
-after `uv pip install oci`).
+Requirements: `pip install oci argon2-cffi` (or `uv pip install oci argon2-cffi`).
 
 Credentials are read from environment variables:
   OCI_TENANCY_ID, OCI_USER_ID, OCI_REGION_ID
@@ -151,6 +150,7 @@ def ensure_network(oci: Any, vnet: Any, compartment: str, name: str, ingest_cidr
         None,
     )
     if vcn is None:
+        print(f"creating VCN {name}-vcn {VCN_CIDR}")
         vcn = vnet.create_vcn(
             models.CreateVcnDetails(
                 compartment_id=compartment,
@@ -162,7 +162,7 @@ def ensure_network(oci: Any, vnet: Any, compartment: str, name: str, ingest_cidr
         ).data
         vcn = wait_state(vnet.get_vcn, vcn.id, ("AVAILABLE",))
     else:
-        pass
+        print(f"reusing VCN {vcn.display_name}")
 
     igw = next(
         (
@@ -173,6 +173,7 @@ def ensure_network(oci: Any, vnet: Any, compartment: str, name: str, ingest_cidr
         None,
     )
     if igw is None:
+        print("creating internet gateway")
         igw = vnet.create_internet_gateway(
             models.CreateInternetGatewayDetails(
                 compartment_id=compartment,
@@ -188,42 +189,41 @@ def ensure_network(oci: Any, vnet: Any, compartment: str, name: str, ingest_cidr
         models.UpdateRouteTableDetails(
             route_rules=[
                 models.RouteRule(
-                    destination="0.0.0.0/0", destination_type="CIDR_BLOCK", network_entity_id=igw.id
-                ),
+                    destination="0.0.0.0/0",
+                    destination_type="CIDR_BLOCK",
+                    network_entity_id=igw.id,
+                )
             ]
         ),
     )
 
-    def tcp(port: int, source: str = "0.0.0.0/0", desc: str = "") -> Any:
-        return models.IngressSecurityRule(
-            protocol="6",
-            source=source,
-            description=desc,
-            tcp_options=models.TcpOptions(
-                destination_port_range=models.PortRange(min=port, max=port)
-            ),
-        )
-
-    def udp(port: int, source: str = "0.0.0.0/0", desc: str = "") -> Any:
+    def port_rule(proto: str, port: int, source: str, desc: str) -> Any:
+        port_range = models.PortRange(min=port, max=port)
+        if proto == "tcp":
+            return models.IngressSecurityRule(
+                protocol="6",
+                source=source,
+                description=desc,
+                tcp_options=models.TcpOptions(destination_port_range=port_range),
+            )
         return models.IngressSecurityRule(
             protocol="17",
             source=source,
             description=desc,
-            udp_options=models.UdpOptions(
-                destination_port_range=models.PortRange(min=port, max=port)
-            ),
+            udp_options=models.UdpOptions(destination_port_range=port_range),
         )
 
+    anywhere = "0.0.0.0/0"
     ingress = [
-        tcp(22, desc="ssh (key only)"),
-        tcp(80, desc="http -> https redirect, ACME"),
-        tcp(443, desc="dashboard / api"),
-        udp(443, desc="http/3"),
-        tcp(1935, ingest_cidr, "rtmp ingest (stream key required)"),
-        udp(8890, ingest_cidr, "srt ingest (stream key required)"),
+        port_rule("tcp", 22, anywhere, "ssh (key only)"),
+        port_rule("tcp", 80, anywhere, "http -> https redirect, ACME"),
+        port_rule("tcp", 443, anywhere, "dashboard / api"),
+        port_rule("udp", 443, anywhere, "http/3"),
+        port_rule("tcp", 1935, ingest_cidr, "rtmp ingest (stream key required)"),
+        port_rule("udp", 8890, ingest_cidr, "srt ingest (stream key required)"),
         models.IngressSecurityRule(
             protocol="1",
-            source="0.0.0.0/0",
+            source=anywhere,
             description="path mtu",
             icmp_options=models.IcmpOptions(type=3, code=4),
         ),
@@ -231,7 +231,7 @@ def ensure_network(oci: Any, vnet: Any, compartment: str, name: str, ingest_cidr
             protocol="1", source=VCN_CIDR, icmp_options=models.IcmpOptions(type=3)
         ),
     ]
-    egress = [models.EgressSecurityRule(protocol="all", destination="0.0.0.0/0")]
+    egress = [models.EgressSecurityRule(protocol="all", destination=anywhere)]
     sl = next(
         (
             s
@@ -243,6 +243,7 @@ def ensure_network(oci: Any, vnet: Any, compartment: str, name: str, ingest_cidr
         None,
     )
     if sl is None:
+        print("creating security list")
         sl = vnet.create_security_list(
             models.CreateSecurityListDetails(
                 compartment_id=compartment,
@@ -255,6 +256,7 @@ def ensure_network(oci: Any, vnet: Any, compartment: str, name: str, ingest_cidr
         ).data
         sl = wait_state(vnet.get_security_list, sl.id, ("AVAILABLE",))
     else:
+        print("updating security list rules")
         vnet.update_security_list(
             sl.id,
             models.UpdateSecurityListDetails(
@@ -273,6 +275,7 @@ def ensure_network(oci: Any, vnet: Any, compartment: str, name: str, ingest_cidr
         None,
     )
     if subnet is None:
+        print(f"creating public subnet {SUBNET_CIDR}")
         subnet = vnet.create_subnet(
             models.CreateSubnetDetails(
                 compartment_id=compartment,
@@ -325,7 +328,8 @@ def cmd_up(args: argparse.Namespace) -> int:
 
     instance = find_instance(compute, compartment, args.name)
     if instance is not None:
-        public_ip(compute, vnet, compartment, instance.id)
+        print(f"instance {args.name} already exists ({instance.lifecycle_state}); not relaunching")
+        print(f"public ip: {public_ip(compute, vnet, compartment, instance.id)}")
         return 0
 
     subnet = ensure_network(oci, vnet, compartment, args.name, args.ingest_cidr)
@@ -337,6 +341,10 @@ def cmd_up(args: argparse.Namespace) -> int:
 
         password = secrets.token_urlsafe(18)
         pw_hash = PasswordHasher().hash(password)
+        if args.password_file:
+            # written before launching, so a lost terminal never loses the password
+            Path(args.password_file).write_text(password + "\n")
+            os.chmod(args.password_file, 0o600)
     user_data = render_cloud_init(
         repo_url=args.repo, branch=args.branch, admin_password_hash=pw_hash, domain=args.domain
     )
@@ -349,8 +357,7 @@ def cmd_up(args: argparse.Namespace) -> int:
         sort_by="TIMECREATED",
         sort_order="DESC",
     ).data[0]
-
-    ads = [a.name for a in ident.list_availability_domains(config["tenancy"]).data]
+    print(f"image: {image.display_name}")
 
     def a1_used(ad: str) -> float:
         try:
@@ -363,48 +370,60 @@ def cmd_up(args: argparse.Namespace) -> int:
         except oci.exceptions.ServiceError:
             return 0.0
 
-    ads.sort(key=a1_used)
+    ads = sorted(
+        (a.name for a in ident.list_availability_domains(config["tenancy"]).data), key=a1_used
+    )
     if args.ad:
         ads = [a for a in ads if a.endswith(args.ad)] or ads
 
+    instance = None
     for ad in ads:
+        print(f"launching {args.name} ({SHAPE} {args.ocpus} OCPU / {args.memory} GB) in {ad}")
+        details = models.LaunchInstanceDetails(
+            availability_domain=ad,
+            compartment_id=compartment,
+            display_name=args.name,
+            shape=SHAPE,
+            shape_config=models.LaunchInstanceShapeConfigDetails(
+                ocpus=args.ocpus, memory_in_gbs=args.memory
+            ),
+            source_details=models.InstanceSourceViaImageDetails(
+                image_id=image.id, boot_volume_size_in_gbs=args.boot_gb
+            ),
+            create_vnic_details=models.CreateVnicDetails(
+                subnet_id=subnet.id,
+                assign_public_ip=True,
+                hostname_label=args.name.replace("-", "")[:15],
+            ),
+            metadata={
+                "ssh_authorized_keys": ssh_key,
+                "user_data": base64.b64encode(user_data.encode()).decode(),
+            },
+            freeform_tags=TAGS,
+        )
         try:
-            instance = compute.launch_instance(
-                models.LaunchInstanceDetails(
-                    availability_domain=ad,
-                    compartment_id=compartment,
-                    display_name=args.name,
-                    shape=SHAPE,
-                    shape_config=models.LaunchInstanceShapeConfigDetails(
-                        ocpus=args.ocpus, memory_in_gbs=args.memory
-                    ),
-                    source_details=models.InstanceSourceViaImageDetails(
-                        image_id=image.id, boot_volume_size_in_gbs=args.boot_gb
-                    ),
-                    create_vnic_details=models.CreateVnicDetails(
-                        subnet_id=subnet.id,
-                        assign_public_ip=True,
-                        hostname_label=args.name.replace("-", "")[:15],
-                    ),
-                    metadata={
-                        "ssh_authorized_keys": ssh_key,
-                        "user_data": base64.b64encode(user_data.encode()).decode(),
-                    },
-                    freeform_tags=TAGS,
-                )
-            ).data
+            instance = compute.launch_instance(details).data
             break
         except oci.exceptions.ServiceError as exc:
             if "capacity" in str(exc.message).lower() and ad != ads[-1]:
+                print(f"  out of capacity in {ad}, trying the next availability domain")
                 continue
             raise
     assert instance is not None
     instance = wait_state(compute.get_instance, instance.id, ("RUNNING", "TERMINATED"), timeout=900)
     if instance.lifecycle_state == "TERMINATED":
         sys.exit(f"instance {instance.id} terminated during launch")
-    public_ip(compute, vnet, compartment, instance.id)
+    ip = public_ip(compute, vnet, compartment, instance.id)
+    url = f"https://{args.domain}" if args.domain else f"https://{ip.replace('.', '-')}.sslip.io"
+    print(f"instance: {instance.id}")
+    print(f"public ip: {ip}")
+    print(f"dashboard (once the bootstrap is done): {url}")
+    print(f"ssh: ssh ubuntu@{ip}")
     if password:
-        pass
+        where = f" (also saved to {args.password_file})" if args.password_file else ""
+        print(f"admin login: admin / {password}{where}")
+        print("  shown once; change it later with `make hash-password` on the VM")
+    print("bootstrap progress: python deploy/oci/provision.py status --follow")
     return 0
 
 
@@ -423,11 +442,14 @@ def cmd_status(args: argparse.Namespace) -> int:
             oci.core.models.CaptureConsoleHistoryDetails(instance_id=instance.id)
         ).data
         cap = wait_state(compute.get_console_history, cap.id, ("SUCCEEDED", "FAILED"), timeout=120)
-        text = compute.get_console_history_content(cap.id, length=1_048_576).data
-        text = text.decode(errors="replace") if isinstance(text, bytes) else str(text)
+        # a capture holds about 1 MB of the most recent console output
+        content = compute.get_console_history_content(cap.id, length=1_048_576).data
+        text = content.decode(errors="replace") if isinstance(content, bytes) else str(content)
         lines = omni_lines(text)
-        for _line in lines[len(seen) :]:
-            pass
+        if not lines and not seen:
+            print("no bootstrap output on the serial console yet")
+        for line in lines[len(seen) :]:
+            print(line, flush=True)
         seen = lines
         with contextlib.suppress(oci.exceptions.ServiceError):
             compute.delete_console_history(cap.id)
@@ -450,13 +472,10 @@ def main(argv: list[str] | None = None) -> int:
     up.add_argument("--ad", default="", help="availability domain suffix, e.g. AD-3")
     up.add_argument("--repo", default=DEFAULT_REPO)
     up.add_argument("--branch", default=current_branch())
-    up.add_argument(
-        "--domain", default="", help="DNS name pointing at the VM (default: <ip>.sslip.io)"
-    )
+    up.add_argument("--domain", default="", help="DNS name for the VM (default: <ip>.sslip.io)")
     up.add_argument("--ingest-cidr", default="0.0.0.0/0", help="who may reach RTMP/SRT ingest")
-    up.add_argument(
-        "--admin-password-hash", default="", help="argon2 hash; default: generate a password"
-    )
+    up.add_argument("--admin-password-hash", default="", help="argon2 hash; default: generate")
+    up.add_argument("--password-file", default="", help="also save a generated password here")
     up.add_argument(
         "--ssh-public-key", default="", help="file; default: public half of the API key"
     )

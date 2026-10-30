@@ -59,6 +59,7 @@ ignore = [
 "tests/**" = ["T20", "S101"]
 "scripts/**" = ["T20"]
 "api/cli.py" = ["T20"]
+"deploy/**" = ["T20"]  # operator CLIs: printing is their interface
 
 [tool.ruff.lint.isort]
 known-first-party = ["core", "api", "relay", "chat"]

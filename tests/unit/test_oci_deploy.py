@@ -68,3 +68,17 @@ def test_cloud_init_never_prints_generated_secrets() -> None:
     for line in script.splitlines():
         if "mark " in line and ("key" in line.lower() and "$key" in line):
             pytest.fail(f"stream key printed: {line}")
+
+
+def test_provision_cli_reports_its_results() -> None:
+    """Regression: a lint autofix once deleted every print(), so `up` silently lost the
+    generated admin password. The operator-facing lines must stay."""
+    source = (ROOT / "deploy" / "oci" / "provision.py").read_text()
+    for needle in (
+        'print(f"public ip:',
+        'print(f"admin login: admin / ',
+        "print(line, flush=True)",
+    ):
+        assert needle in source, needle
+    pyproject = (ROOT / "pyproject.toml").read_text()
+    assert '"deploy/**" = ["T20"]' in pyproject
