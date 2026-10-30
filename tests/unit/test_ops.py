@@ -231,8 +231,10 @@ def test_cli_restore(
     get_settings.cache_clear()
     assert cli.main(["backup"]) == 0
     snapshot = next(backups.glob("omnistream-*.db"))
+    # kept now: the `backup --keep 1` below may rotate the file itself away
+    snapshot_bytes = snapshot.read_bytes()
     # backups are self-contained (rollback journal, not WAL): header bytes 18/19 == 1
-    assert snapshot.read_bytes()[18:20] == b"\x01\x01"
+    assert snapshot_bytes[18:20] == b"\x01\x01"
 
     with Session(engine) as session:  # diverge from the snapshot
         session.add(Destination(name="added later", rtmp_url="rtmp://c/d"))
@@ -258,7 +260,7 @@ def test_cli_restore(
 
     # a copy taken from a live WAL database with a pending -wal next to it is refused
     live_copy = tmp_path / "live-copy.db"
-    live_copy.write_bytes(snapshot.read_bytes())
+    live_copy.write_bytes(snapshot_bytes)
     Path(f"{live_copy}-wal").write_bytes(b"pending")
     assert cli.main(["restore", str(live_copy), "--yes"]) == 2
     assert "may be missing changes" in capsys.readouterr().err
