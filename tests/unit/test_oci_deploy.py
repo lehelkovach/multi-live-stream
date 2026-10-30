@@ -82,3 +82,19 @@ def test_provision_cli_reports_its_results() -> None:
         assert needle in source, needle
     pyproject = (ROOT / "pyproject.toml").read_text()
     assert '"deploy/**" = ["T20"]' in pyproject
+
+
+def test_down_only_deletes_what_it_created() -> None:
+    from types import SimpleNamespace
+
+    provision = load_provision()
+    assert provision.ours(SimpleNamespace(freeform_tags=dict(provision.TAGS)))
+    assert not provision.ours(SimpleNamespace(freeform_tags={"project": "omnistream"}))
+    assert not provision.ours(SimpleNamespace(freeform_tags=None))
+    assert not provision.ours(SimpleNamespace())
+
+
+def test_down_requires_confirmation() -> None:
+    provision = load_provision()
+    with pytest.raises(SystemExit, match="--yes"):
+        provision.main(["down"])

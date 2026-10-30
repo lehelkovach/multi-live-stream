@@ -14,9 +14,14 @@ are reused by name, so re-running it is safe.
 pip install oci argon2-cffi                      # or: uv pip install oci
 export OCI_TENANCY_ID=... OCI_USER_ID=... OCI_REGION_ID=... \
        OCI_FINGERPRINT=... OCI_KEY_FILE=~/.oci/key.pem   # API signing key
-python deploy/oci/provision.py up --branch main  # prints IP, URL and the admin password once
+python deploy/oci/provision.py up --branch main --password-file ~/omnistream-admin.txt
 python deploy/oci/provision.py status --follow   # bootstrap progress, read from the serial console
+python deploy/oci/provision.py down --yes        # delete the VM + boot volume (--network: VCN too)
 ```
+
+`up` prints the IP, URL and the generated admin password once; `--password-file`
+also writes it (mode 600) before the VM is launched, so it survives a lost
+terminal. `down` only deletes resources tagged `provisioned-by` this script.
 
 Defaults: 1 OCPU / 6 GB (`--ocpus`, `--memory`; resize later with a reboot),
 50 GB boot volume, `https://<ip-with-dashes>.sslip.io` as the hostname so Caddy

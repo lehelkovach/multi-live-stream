@@ -11,6 +11,15 @@ One entry per completed phase (plus notable fixes). Newest first.
 * `deploy/oci/cloud-init.sh`: host firewall, Docker, clone, `.env` (admin password
   injected only as an argon2 hash), `docker compose up -d --build`, health wait,
   RTMP ingest smoke test, Let's Encrypt via `<ip>.sslip.io`.
+* `provision.py down --yes [--network]` tears it down again, deleting only
+  resources tagged as created by the script; `up --password-file` saves the
+  generated admin password before launch.
+* First real **linux/arm64** run (VM.Standard.A1.Flex, Ubuntu 24.04 aarch64): the
+  whole stack built and came up healthy, wrong stream key rejected, ingest went
+  live and the relay saw it, edge `/healthz` ok over a trusted certificate.
+* Fixed: an unsafe lint autofix had removed every `print()` from the
+  provisioner, so `up` ran silently; `deploy/` is now exempt from the no-print
+  rule and a test pins the operator-facing output.
 * Fixed: an argon2 hash pasted into `.env` without single quotes is mangled by
   Docker Compose's `$` expansion, so the admin login always failed. The API now
   refuses to start with a clear message, `make hash-password` prints a quoted
@@ -19,7 +28,7 @@ One entry per completed phase (plus notable fixes). Newest first.
 ## Full-stack verification + fixes (2026-10-28)
 
 The real `docker compose up -d` stack was run end to end for the first time (in
-the development sandbox; linux/amd64, arm64 is covered by the CI image builds):
+the development sandbox; linux/amd64 — arm64 was first run on OCI, above):
 all services healthy, HTTPS + HTTP redirect through Caddy, `/internal/*` blocked
 at the edge, Secure/HttpOnly session cookie, WebSocket through the edge, RTMP and
 SRT ingest with good and wrong keys, relay to a fake platform container on the

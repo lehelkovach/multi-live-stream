@@ -20,6 +20,7 @@ The VM gets the public half of the API key as its SSH key unless
 Usage:
   python deploy/oci/provision.py up --branch main      # prints the admin password once
   python deploy/oci/provision.py status --follow       # bootstrap progress from the serial console
+  python deploy/oci/provision.py down --yes            # delete the VM (--network: the VCN too)
 """
 
 from __future__ import annotations
@@ -137,6 +138,28 @@ def wait_state(get: Any, ocid: str, states: tuple[str, ...], timeout: float = 60
         if time.monotonic() > deadline:
             sys.exit(f"timed out waiting for {ocid} to reach {states} (is {obj.lifecycle_state})")
         time.sleep(5)
+
+
+def ours(resource: Any) -> bool:
+    """Only resources this script created (by tag) may be deleted by `down`."""
+    tags = getattr(resource, "freeform_tags", None) or {}
+    return tags.get("provisioned-by") == TAGS["provisioned-by"]
+
+
+def wait_gone(get: Any, ocid: str, timeout: float = 900) -> None:
+    import oci
+
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            if get(ocid).data.lifecycle_state == "TERMINATED":
+                return
+        except oci.exceptions.ServiceError as exc:
+            if exc.status == 404:
+                return
+            raise
+        time.sleep(5)
+    sys.exit(f"timed out waiting for {ocid} to be deleted")
 
 
 def ensure_network(oci: Any, vnet: Any, compartment: str, name: str, ingest_cidr: str) -> Any:
@@ -459,6 +482,66 @@ def cmd_status(args: argparse.Namespace) -> int:
         time.sleep(args.interval)
 
 
+def cmd_down(args: argparse.Namespace) -> int:
+    if not args.yes:
+        sys.exit("this deletes the VM and its boot volume; re-run with --yes")
+    import oci
+
+    config, compartment, _ = oci_config()
+    compute = oci.core.ComputeClient(config)
+    vnet = oci.core.VirtualNetworkClient(config)
+    instance = find_instance(compute, compartment, args.name)
+    if instance is None:
+        print(f"no instance named {args.name}")
+    elif not ours(instance):
+        sys.exit(f"{args.name} was not created by this script; not touching it")
+    else:
+        print(f"terminating {instance.id} and its boot volume")
+        compute.terminate_instance(instance.id, preserve_boot_volume=False)
+        wait_gone(compute.get_instance, instance.id)
+        print("instance terminated")
+    if not args.network:
+        return 0
+
+    vcn = next(
+        (
+            v
+            for v in vnet.list_vcns(compartment, display_name=f"{args.name}-vcn").data
+            if v.lifecycle_state == "AVAILABLE"
+        ),
+        None,
+    )
+    if vcn is None:
+        print(f"no VCN named {args.name}-vcn")
+        return 0
+    if not ours(vcn):
+        sys.exit(f"{vcn.display_name} was not created by this script; not touching it")
+    for subnet in vnet.list_subnets(compartment, vcn_id=vcn.id).data:
+        if subnet.lifecycle_state == "AVAILABLE":
+            print(f"deleting subnet {subnet.display_name}")
+            vnet.delete_subnet(subnet.id)
+            wait_gone(vnet.get_subnet, subnet.id)
+    # the default route table goes with the VCN, but must stop referencing the gateway first
+    vnet.update_route_table(
+        vcn.default_route_table_id, oci.core.models.UpdateRouteTableDetails(route_rules=[])
+    )
+    for igw in vnet.list_internet_gateways(compartment, vcn_id=vcn.id).data:
+        if igw.lifecycle_state == "AVAILABLE":
+            print(f"deleting internet gateway {igw.display_name}")
+            vnet.delete_internet_gateway(igw.id)
+            wait_gone(vnet.get_internet_gateway, igw.id)
+    for sl in vnet.list_security_lists(compartment, vcn_id=vcn.id).data:
+        if sl.id != vcn.default_security_list_id and sl.lifecycle_state == "AVAILABLE":
+            print(f"deleting security list {sl.display_name}")
+            vnet.delete_security_list(sl.id)
+            wait_gone(vnet.get_security_list, sl.id)
+    print(f"deleting VCN {vcn.display_name}")
+    vnet.delete_vcn(vcn.id)
+    wait_gone(vnet.get_vcn, vcn.id)
+    print("network deleted")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -486,6 +569,11 @@ def main(argv: list[str] | None = None) -> int:
     st.add_argument("--interval", type=float, default=30.0)
     st.add_argument("--timeout", type=float, default=3600.0)
     st.set_defaults(func=cmd_status)
+    dn = sub.add_parser("down", help="terminate the VM and delete its boot volume")
+    dn.add_argument("--name", default="omnistream")
+    dn.add_argument("--network", action="store_true", help="also delete the VCN it created")
+    dn.add_argument("--yes", action="store_true", help="confirm the deletion")
+    dn.set_defaults(func=cmd_down)
     args = parser.parse_args(argv)
     return int(args.func(args))
 
