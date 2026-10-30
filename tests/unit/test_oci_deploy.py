@@ -185,3 +185,57 @@ def test_new_security_list_defaults_to_open_ingest() -> None:
     [(call, details)] = [c for c in vnet.calls if "security_list" in c[0]]
     assert call == "create_security_list"
     assert _ingest_sources(details) == {"0.0.0.0/0"}
+
+
+class _RequestError(Exception):
+    """Like oci.exceptions.RequestException: a connection failure, no HTTP status."""
+
+
+class _ServiceError(Exception):
+    def __init__(self, status: int) -> None:
+        super().__init__(status)
+        self.status = status
+
+
+def _status_with(
+    monkeypatch: pytest.MonkeyPatch, results: list[object], argv: list[str]
+) -> tuple[int, list[object]]:
+    import sys
+
+    provision = load_provision()
+    fake_oci = SimpleNamespace(
+        exceptions=SimpleNamespace(RequestException=_RequestError, ServiceError=_ServiceError),
+        core=SimpleNamespace(ComputeClient=lambda _config: object()),
+    )
+    monkeypatch.setitem(sys.modules, "oci", fake_oci)
+    monkeypatch.setattr(provision, "oci_config", lambda: ({}, "comp", "ssh-key"))
+    monkeypatch.setattr(provision, "find_instance", lambda *_a: SimpleNamespace(id="i1"))
+    monkeypatch.setattr(provision.time, "sleep", lambda _s: None)
+    remaining = list(results)
+
+    def read_console(*_a: object) -> str:
+        result = remaining.pop(0)
+        if isinstance(result, Exception):
+            raise result
+        return str(result)
+
+    monkeypatch.setattr(provision, "read_console", read_console)
+    return provision.main(["status", *argv]), remaining
+
+
+def test_status_follow_survives_transient_errors(monkeypatch: pytest.MonkeyPatch) -> None:
+    rc, left = _status_with(
+        monkeypatch,
+        [_RequestError("proxy dropped"), _ServiceError(503), "OMNI: DONE url=https://x\n"],
+        ["--follow", "--interval", "0"],
+    )
+    assert (rc, left) == (0, [])
+
+
+def test_status_does_not_retry_auth_errors_or_one_shot_reads(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    with pytest.raises(_ServiceError):
+        _status_with(monkeypatch, [_ServiceError(401)], ["--follow", "--interval", "0"])
+    with pytest.raises(_RequestError):
+        _status_with(monkeypatch, [_RequestError("down")], [])

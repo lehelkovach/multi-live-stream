@@ -456,6 +456,21 @@ def cmd_up(args: argparse.Namespace) -> int:
     return 0
 
 
+def read_console(oci: Any, compute: Any, instance_id: str) -> str:
+    """Capture the serial console and return its text; the capture is deleted afterwards."""
+    cap = compute.capture_console_history(
+        oci.core.models.CaptureConsoleHistoryDetails(instance_id=instance_id)
+    ).data
+    try:
+        cap = wait_state(compute.get_console_history, cap.id, ("SUCCEEDED", "FAILED"), timeout=120)
+        # a capture holds about 1 MB of the most recent console output
+        content = compute.get_console_history_content(cap.id, length=1_048_576).data
+    finally:
+        with contextlib.suppress(oci.exceptions.ServiceError, oci.exceptions.RequestException):
+            compute.delete_console_history(cap.id)
+    return content.decode(errors="replace") if isinstance(content, bytes) else str(content)
+
+
 def cmd_status(args: argparse.Namespace) -> int:
     import oci
 
@@ -467,21 +482,22 @@ def cmd_status(args: argparse.Namespace) -> int:
     seen: list[str] = []
     deadline = time.monotonic() + args.timeout
     while True:
-        cap = compute.capture_console_history(
-            oci.core.models.CaptureConsoleHistoryDetails(instance_id=instance.id)
-        ).data
-        cap = wait_state(compute.get_console_history, cap.id, ("SUCCEEDED", "FAILED"), timeout=120)
-        # a capture holds about 1 MB of the most recent console output
-        content = compute.get_console_history_content(cap.id, length=1_048_576).data
-        text = content.decode(errors="replace") if isinstance(content, bytes) else str(content)
+        try:
+            text = read_console(oci, compute, instance.id)
+        except (oci.exceptions.RequestException, oci.exceptions.ServiceError) as exc:
+            status = getattr(exc, "status", None)
+            transient = status is None or status == 429 or status >= 500
+            if not (args.follow and transient) or time.monotonic() > deadline:
+                raise
+            print(f"(console read failed: {type(exc).__name__}; retrying)", flush=True)
+            time.sleep(args.interval)
+            continue
         lines = omni_lines(text)
         if not lines and not seen:
             print("no bootstrap output on the serial console yet")
         for line in lines[len(seen) :]:
             print(line, flush=True)
         seen = lines
-        with contextlib.suppress(oci.exceptions.ServiceError):
-            compute.delete_console_history(cap.id)
         finished = any(line.startswith(("DONE", "FAILED")) for line in lines)
         if finished or not args.follow or time.monotonic() > deadline:
             return 1 if any(line.startswith("FAILED") for line in lines) else 0

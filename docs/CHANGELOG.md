@@ -16,6 +16,8 @@ One entry per completed phase (plus notable fixes). Newest first.
   generated admin password before launch.
 * `up --ingest-cidr` on an existing VM updates the security list in place; a
   plain re-run keeps the current rules, so it can't reopen a restricted ingest.
+* `status --follow` retries transient network/5xx/429 errors instead of dying on
+  one dropped connection; auth and other client errors still stop it.
 * First real **linux/arm64** run (VM.Standard.A1.Flex, Ubuntu 24.04 aarch64): the
   whole stack built and came up healthy, wrong stream key rejected, ingest went
   live and the relay saw it, edge `/healthz` ok over a trusted certificate.
