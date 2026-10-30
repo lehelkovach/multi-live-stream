@@ -14,6 +14,8 @@ One entry per completed phase (plus notable fixes). Newest first.
 * `provision.py down --yes [--network]` tears it down again, deleting only
   resources tagged as created by the script; `up --password-file` saves the
   generated admin password before launch.
+* `up --ingest-cidr` on an existing VM updates the security list in place; a
+  plain re-run keeps the current rules, so it can't reopen a restricted ingest.
 * First real **linux/arm64** run (VM.Standard.A1.Flex, Ubuntu 24.04 aarch64): the
   whole stack built and came up healthy, wrong stream key rejected, ingest went
   live and the relay saw it, edge `/healthz` ok over a trusted certificate.

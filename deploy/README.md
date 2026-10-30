@@ -27,8 +27,10 @@ Defaults: 1 OCPU / 6 GB (`--ocpus`, `--memory`; resize later with a reboot),
 50 GB boot volume, `https://<ip-with-dashes>.sslip.io` as the hostname so Caddy
 gets a real Let's Encrypt certificate without a domain (`--domain` for your
 own), ingest open to the internet but protected by the stream key
-(`--ingest-cidr 203.0.113.7/32` to restrict it). The admin password is only
-passed to the VM as an argon2 hash; the other secrets are generated on the VM.
+(`--ingest-cidr 203.0.113.7/32` to restrict it; on an existing VM, re-running
+`up` with it updates the rules in place, and without it keeps them). The admin
+password is only passed to the VM as an argon2 hash; the other secrets are
+generated on the VM.
 
 ## VM
 

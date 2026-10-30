@@ -6,7 +6,8 @@ import importlib.util
 import shutil
 import subprocess
 from pathlib import Path
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -85,8 +86,6 @@ def test_provision_cli_reports_its_results() -> None:
 
 
 def test_down_only_deletes_what_it_created() -> None:
-    from types import SimpleNamespace
-
     provision = load_provision()
     assert provision.ours(SimpleNamespace(freeform_tags=dict(provision.TAGS)))
     assert not provision.ours(SimpleNamespace(freeform_tags={"project": "omnistream"}))
@@ -98,3 +97,91 @@ def test_down_requires_confirmation() -> None:
     provision = load_provision()
     with pytest.raises(SystemExit, match="--yes"):
         provision.main(["down"])
+
+
+class _FakeModels:
+    """Stands in for oci.core.models: every model is a plain namespace of its kwargs."""
+
+    def __getattr__(self, name: str) -> object:
+        return lambda **kw: SimpleNamespace(model=name, **kw)
+
+
+class _FakeVnet:
+    """An existing VCN, gateway and subnet; the security list exists if `sl_exists`."""
+
+    def __init__(self, *, sl_exists: bool) -> None:
+        self.calls: list[tuple[str, object]] = []
+        ok = "AVAILABLE"
+        self.vcn = SimpleNamespace(
+            id="vcn1", display_name="omni-vcn", lifecycle_state=ok, default_route_table_id="rt1"
+        )
+        self.igw = SimpleNamespace(id="igw1", lifecycle_state=ok)
+        self.sl = SimpleNamespace(id="sl1", lifecycle_state=ok)
+        self.subnet = SimpleNamespace(id="sub1", lifecycle_state=ok)
+        self.sl_exists = sl_exists
+
+    def _data(self, value: object) -> object:
+        return SimpleNamespace(data=value)
+
+    def list_vcns(self, *_a: object, **_k: object) -> object:
+        return self._data([self.vcn])
+
+    def list_internet_gateways(self, *_a: object, **_k: object) -> object:
+        return self._data([self.igw])
+
+    def update_route_table(self, *a: object) -> None:
+        self.calls.append(("update_route_table", a))
+
+    def list_security_lists(self, *_a: object, **_k: object) -> object:
+        return self._data([self.sl] if self.sl_exists else [])
+
+    def update_security_list(self, sl_id: str, details: object) -> None:
+        self.calls.append(("update_security_list", details))
+
+    def create_security_list(self, details: object) -> object:
+        self.calls.append(("create_security_list", details))
+        return self._data(self.sl)
+
+    def get_security_list(self, _id: str) -> object:
+        return self._data(self.sl)
+
+    def list_subnets(self, *_a: object, **_k: object) -> object:
+        return self._data([self.subnet])
+
+
+def _ingest_sources(details: Any) -> set[str]:
+    """The sources allowed to reach the RTMP/SRT ports."""
+    sources = set()
+    for rule in details.ingress_security_rules:
+        opts = getattr(rule, "tcp_options", None) or getattr(rule, "udp_options", None)
+        if opts is not None and opts.destination_port_range.min in (1935, 8890):
+            sources.add(rule.source)
+    return sources
+
+
+def _ensure(vnet: _FakeVnet, ingest_cidr: str) -> None:
+    provision = load_provision()
+    fake_oci = SimpleNamespace(core=SimpleNamespace(models=_FakeModels()))
+    assert provision.ensure_network(fake_oci, vnet, "comp", "omni", ingest_cidr) is vnet.subnet
+
+
+def test_rerun_without_ingest_cidr_keeps_existing_rules() -> None:
+    vnet = _FakeVnet(sl_exists=True)
+    _ensure(vnet, "")
+    assert [c for c, _ in vnet.calls if "security_list" in c] == []
+
+
+def test_ingest_cidr_updates_existing_rules() -> None:
+    vnet = _FakeVnet(sl_exists=True)
+    _ensure(vnet, "203.0.113.7/32")
+    [(call, details)] = [c for c in vnet.calls if "security_list" in c[0]]
+    assert call == "update_security_list"
+    assert _ingest_sources(details) == {"203.0.113.7/32"}
+
+
+def test_new_security_list_defaults_to_open_ingest() -> None:
+    vnet = _FakeVnet(sl_exists=False)
+    _ensure(vnet, "")
+    [(call, details)] = [c for c in vnet.calls if "security_list" in c[0]]
+    assert call == "create_security_list"
+    assert _ingest_sources(details) == {"0.0.0.0/0"}

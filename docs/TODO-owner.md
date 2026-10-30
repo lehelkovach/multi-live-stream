@@ -3,17 +3,29 @@
 Checked off items move to the bottom. Claude keeps working on everything that is
 not blocked by these.
 
-## Now (Phase 0/1)
+## Now
 
-- [ ] **DNS**: point a hostname (e.g. `stream.example.com`) at the VM's public IP
-      and set `OMNI_DOMAIN` in `.env`. Without it Caddy uses a self-signed cert.
-- [ ] **OCI security list / NSG** for the VM's subnet, ingress:
-      `80/tcp`, `443/tcp`, `443/udp` (HTTP/3) from `0.0.0.0/0`;
-      `1935/tcp` (RTMP) and `8890/udp` (SRT) ideally restricted to the IPs you
-      stream from. See `deploy/README.md` for the host firewall step too (Oracle
-      Ubuntu images ship with iptables rules that drop everything but 22).
-- [ ] Run `python3 scripts/init_env.py --domain <hostname>` on the VM and store the
-      printed admin password + stream key in your password manager.
+- [ ] **GitHub Actions never runs**: every CI run is refused before a runner
+      starts (no logs, ~3 s). That is an account-level block, usually a billing
+      problem or a spending limit of $0 on a private repo, or Actions disabled.
+      Check GitHub → Settings → Billing and plans, and the repo's Settings →
+      Actions. Until then CI gives no signal; tests are run locally.
+- [ ] **Admin password**: `deploy/oci/provision.py up` prints the generated one
+      once (and writes it with `--password-file`). Store it in your password
+      manager; change it on the VM with `make hash-password`, paste the quoted
+      line into `/opt/omnistream/.env`, then `docker compose up -d api`.
+- [ ] **Restrict ingest** (optional): RTMP/SRT are open to the internet and
+      protected only by the stream key. To lock them to your own IP, re-run
+      `provision.py up --ingest-cidr <your-ip>/32` (it updates the rules in place).
+- [ ] **Hostname** (decide before registering OAuth apps): the automated deploy
+      uses `<ip-with-dashes>.sslip.io`. The public IP survives reboots and
+      stop/start but changes if the VM is recreated, and the OAuth redirect URIs
+      below would then break. For a stable name, point your own DNS record at the
+      VM and set `OMNI_DOMAIN` in `/opt/omnistream/.env` (or pass `--domain` to
+      `provision.py up` for a new VM).
+
+Manual (non-scripted) installs also need the OCI security list, the host
+firewall and `scripts/init_env.py`; see `deploy/README.md`.
 
 ## Phase 3 - chat (OAuth apps; each is ~5 minutes in the platform console)
 

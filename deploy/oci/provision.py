@@ -163,6 +163,8 @@ def wait_gone(get: Any, ocid: str, timeout: float = 900) -> None:
 
 
 def ensure_network(oci: Any, vnet: Any, compartment: str, name: str, ingest_cidr: str) -> Any:
+    """Find or create the VCN pieces. An existing security list keeps its rules
+    unless `ingest_cidr` is given, so a plain re-run never reopens a restricted ingest."""
     models = oci.core.models
     vcn = next(
         (
@@ -242,8 +244,8 @@ def ensure_network(oci: Any, vnet: Any, compartment: str, name: str, ingest_cidr
         port_rule("tcp", 80, anywhere, "http -> https redirect, ACME"),
         port_rule("tcp", 443, anywhere, "dashboard / api"),
         port_rule("udp", 443, anywhere, "http/3"),
-        port_rule("tcp", 1935, ingest_cidr, "rtmp ingest (stream key required)"),
-        port_rule("udp", 8890, ingest_cidr, "srt ingest (stream key required)"),
+        port_rule("tcp", 1935, ingest_cidr or anywhere, "rtmp ingest (stream key required)"),
+        port_rule("udp", 8890, ingest_cidr or anywhere, "srt ingest (stream key required)"),
         models.IngressSecurityRule(
             protocol="1",
             source=anywhere,
@@ -278,8 +280,10 @@ def ensure_network(oci: Any, vnet: Any, compartment: str, name: str, ingest_cidr
             )
         ).data
         sl = wait_state(vnet.get_security_list, sl.id, ("AVAILABLE",))
+    elif not ingest_cidr:
+        print("keeping security list rules (pass --ingest-cidr to change them)")
     else:
-        print("updating security list rules")
+        print(f"updating security list rules (ingest from {ingest_cidr})")
         vnet.update_security_list(
             sl.id,
             models.UpdateSecurityListDetails(
@@ -351,6 +355,8 @@ def cmd_up(args: argparse.Namespace) -> int:
 
     instance = find_instance(compute, compartment, args.name)
     if instance is not None:
+        if args.ingest_cidr:
+            ensure_network(oci, vnet, compartment, args.name, args.ingest_cidr)
         print(f"instance {args.name} already exists ({instance.lifecycle_state}); not relaunching")
         print(f"public ip: {public_ip(compute, vnet, compartment, instance.id)}")
         return 0
@@ -556,7 +562,12 @@ def main(argv: list[str] | None = None) -> int:
     up.add_argument("--repo", default=DEFAULT_REPO)
     up.add_argument("--branch", default=current_branch())
     up.add_argument("--domain", default="", help="DNS name for the VM (default: <ip>.sslip.io)")
-    up.add_argument("--ingest-cidr", default="0.0.0.0/0", help="who may reach RTMP/SRT ingest")
+    up.add_argument(
+        "--ingest-cidr",
+        default="",
+        help="who may reach RTMP/SRT ingest, e.g. 203.0.113.7/32 (default: anyone for a new "
+        "network; an existing network keeps its rules unless this is given)",
+    )
     up.add_argument("--admin-password-hash", default="", help="argon2 hash; default: generate")
     up.add_argument("--password-file", default="", help="also save a generated password here")
     up.add_argument(
