@@ -18,9 +18,14 @@ against current docs; nothing here is a guess.
 Stream copy (`-c copy`) is used for every row; make OBS output H.264 + AAC, which
 all of the above accept. `vertical_720p` re-encodes (opt-in per destination).
 
-Verified in Phase 1 against two local MediaMTX "fake platforms" (RTMP). RTMPS and
-SRT outputs rely on the Debian `ffmpeg` build in the image (OpenSSL/GnuTLS + libsrt
-are compiled in); first real-platform runs should be checked with `make logs S=relay`.
+Verified in Phase 1 against two local MediaMTX "fake platforms" (RTMP). RTMPS
+verified on 2026-11-03: the relay's exact command, run with the image's ffmpeg
+(5.1.9, Debian 12 package: GnuTLS + libsrt compiled in), pushed `-c copy` H.264 +
+AAC to a MediaMTX that only accepts RTMPS (`rtmpEncryption: strict`), and the
+received stream decoded cleanly. That ffmpeg does not verify the platform's TLS
+certificate (it accepted a self-signed one), so a network-level attacker between
+the VM and the platform could read the stream key; OBS itself does verify. Not yet
+run against the real platforms: check the first live run with `make logs S=relay`.
 
 Keyframe interval: YouTube/Twitch/Facebook want a keyframe every 2 s (Kick/X are
 fine with it too). Set OBS to a 2 s keyframe interval; `copy` cannot change it.
