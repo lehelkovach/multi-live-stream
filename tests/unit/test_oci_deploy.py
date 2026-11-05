@@ -49,6 +49,25 @@ def test_render_fills_every_placeholder_and_keeps_the_hash_literal(tmp_path: Pat
     assert out == pw_hash
 
 
+def test_spike_script_renders_and_is_valid_bash() -> None:
+    """The Redroid spike is launched through the same provisioner with --script; it has
+    no OmniStream placeholders (so no admin password is generated) and must parse."""
+    provision = load_provision()
+    script = ROOT / "mobile" / "spike" / "redroid-cloud-init.sh"
+    text = script.read_text()
+    assert "__ADMIN_PASSWORD_HASH__" not in text
+    rendered = provision.render_cloud_init(
+        repo_url="r", branch="b", admin_password_hash="", script=script
+    )
+    assert rendered == text
+    # what `provision.py status` reads
+    assert "OMNI: " in text
+    assert "DONE" in text
+    assert "127.0.0.1:5555:5555" in text  # adb never published beyond the VM
+    if shutil.which("bash"):
+        subprocess.run(["bash", "-n", str(script)], check=True)
+
+
 def test_render_rejects_quotes() -> None:
     provision = load_provision()
     with pytest.raises(ValueError, match="single quotes"):

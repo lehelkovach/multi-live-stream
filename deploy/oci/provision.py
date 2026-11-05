@@ -50,13 +50,18 @@ TAGS = {"project": "omnistream", "provisioned-by": "deploy/oci/provision.py"}
 
 
 def render_cloud_init(
-    *, repo_url: str, branch: str, admin_password_hash: str, domain: str = ""
+    *,
+    repo_url: str,
+    branch: str,
+    admin_password_hash: str,
+    domain: str = "",
+    script: Path = CLOUD_INIT,
 ) -> str:
-    """Fill the placeholders of deploy/oci/cloud-init.sh."""
+    """Fill the placeholders of deploy/oci/cloud-init.sh (or another first-boot script)."""
     if "'" in admin_password_hash:
         msg = "admin password hash must not contain single quotes"
         raise ValueError(msg)
-    text = CLOUD_INIT.read_text()
+    text = script.read_text()
     values = {
         "__REPO_URL__": repo_url,
         "__BRANCH__": branch,
@@ -363,9 +368,12 @@ def cmd_up(args: argparse.Namespace) -> int:
 
     subnet = ensure_network(oci, vnet, compartment, args.name, args.ingest_cidr)
 
+    script = Path(args.script)
+    # other first-boot scripts (e.g. the Redroid spike) don't run the dashboard
+    omnistream = "__ADMIN_PASSWORD_HASH__" in script.read_text()
     password = ""
     pw_hash = args.admin_password_hash
-    if not pw_hash:
+    if omnistream and not pw_hash:
         from argon2 import PasswordHasher
 
         password = secrets.token_urlsafe(18)
@@ -375,7 +383,11 @@ def cmd_up(args: argparse.Namespace) -> int:
             Path(args.password_file).write_text(password + "\n")
             os.chmod(args.password_file, 0o600)
     user_data = render_cloud_init(
-        repo_url=args.repo, branch=args.branch, admin_password_hash=pw_hash, domain=args.domain
+        repo_url=args.repo,
+        branch=args.branch,
+        admin_password_hash=pw_hash,
+        domain=args.domain,
+        script=script,
     )
 
     image = compute.list_images(
@@ -446,13 +458,14 @@ def cmd_up(args: argparse.Namespace) -> int:
     url = f"https://{args.domain}" if args.domain else f"https://{ip.replace('.', '-')}.sslip.io"
     print(f"instance: {instance.id}")
     print(f"public ip: {ip}")
-    print(f"dashboard (once the bootstrap is done): {url}")
+    if omnistream:
+        print(f"dashboard (once the bootstrap is done): {url}")
     print(f"ssh: ssh ubuntu@{ip}")
     if password:
         where = f" (also saved to {args.password_file})" if args.password_file else ""
         print(f"admin login: admin / {password}{where}")
         print("  shown once; change it later with `make hash-password` on the VM")
-    print("bootstrap progress: python deploy/oci/provision.py status --follow")
+    print(f"bootstrap progress: python deploy/oci/provision.py status --name {args.name} --follow")
     return 0
 
 
@@ -588,6 +601,11 @@ def main(argv: list[str] | None = None) -> int:
     up.add_argument("--password-file", default="", help="also save a generated password here")
     up.add_argument(
         "--ssh-public-key", default="", help="file; default: public half of the API key"
+    )
+    up.add_argument(
+        "--script",
+        default=str(CLOUD_INIT),
+        help="first-boot script (default: the OmniStream install, deploy/oci/cloud-init.sh)",
     )
     up.set_defaults(func=cmd_up)
     st = sub.add_parser("status", help="print bootstrap progress from the serial console")

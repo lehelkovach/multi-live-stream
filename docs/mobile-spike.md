@@ -124,6 +124,19 @@ risk is accepted in writing in this file. Otherwise: fall back to real phones
 
 ## 6. Findings (fill in on the VM)
 
+Steps 1 and the camera check run unattended on a throwaway VM, no SSH needed:
+
+```bash
+python deploy/oci/provision.py up --name redroid-spike --ocpus 2 --memory 8 \
+    --script mobile/spike/redroid-cloud-init.sh
+python deploy/oci/provision.py status --name redroid-spike --follow   # results, ~10 min
+python deploy/oci/provision.py down --name redroid-spike --network --yes
+```
+
+It reports kernel config, binder/memfd/dma-heap availability, Redroid 14 pull and
+boot time, the Android version, how many cameras Android sees, and CPU use with an
+app open. The virtual-camera, app sign-in and 30-minute rows need hands-on work.
+
 | Date | Step | Result | Notes |
 |------|------|--------|-------|
 |      | modprobe binder_linux on OCI Ubuntu 24.04 arm64 | | kernel version: |
