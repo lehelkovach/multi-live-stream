@@ -15,9 +15,11 @@ set -uo pipefail
 LOG=/var/log/redroid-spike.log
 IMAGE="redroid/redroid:14.0.0_64only-latest"
 SERIAL=127.0.0.1:5555
+ANDROID_PATH=/product/bin:/apex/com.android.runtime/bin:/apex/com.android.art/bin:/system_ext/bin:/system/bin:/system/xbin:/odm/bin:/vendor/bin:/vendor/xbin
 mark() { echo "OMNI: $*" | tee -a "$LOG" > /dev/console; }
 quiet() { "$@" >> "$LOG" 2>&1; }
-adbs() { adb -s "$SERIAL" "$@" 2>> "$LOG" | tr -d '\r'; }
+# a shell inside Android without depending on adb (adb is checked on its own below)
+andro() { docker exec redroid /system/bin/sh -c "PATH=$ANDROID_PATH; $*" 2>> "$LOG" | tr -d '\r'; }
 
 mark "start $(date -u +%FT%TZ) arch=$(uname -m) kernel=$(uname -r)" \
     "pagesize=$(getconf PAGESIZE) cpus=$(nproc) mem=$(free -g | awk '/^Mem/ {print $2}')G"
@@ -26,12 +28,14 @@ mark "kernel config: $(grep -hE '^CONFIG_(ANDROID_BINDER_IPC|ANDROID_BINDERFS|AS
 
 export DEBIAN_FRONTEND=noninteractive
 quiet apt-get update
-if quiet apt-get install -y "linux-modules-extra-$(uname -r)" sysstat \
-    && { quiet apt-get install -y adb || quiet apt-get install -y android-tools-adb; }; then
-    mark "packages ok ($(adb version | head -1))"
-else
-    mark "packages FAILED (see $LOG)"
-fi
+# one at a time: a missing package (e.g. no modules-extra for a vendor kernel) must
+# not stop the others from installing
+missing=""
+for pkg in sysstat adb "linux-modules-extra-$(uname -r)"; do
+    quiet apt-get install -y "$pkg" || missing="$missing $pkg"
+done
+command -v adb > /dev/null || quiet apt-get install -y android-tools-adb
+mark "packages: missing=[${missing# }] adb=$(command -v adb > /dev/null && adb version | head -1)"
 if curl -fsSL https://get.docker.com | quiet sh; then
     mark "docker $(docker version --format '{{.Server.Version}}')"
 else
@@ -64,8 +68,7 @@ quiet docker run -d --name redroid --privileged \
 t0=$(date +%s)
 booted=0
 for _ in $(seq 1 72); do  # up to 6 minutes
-    quiet adb connect "$SERIAL"
-    if [ "$(adbs shell getprop sys.boot_completed)" = "1" ]; then booted=1; break; fi
+    if [ "$(andro getprop sys.boot_completed)" = "1" ]; then booted=1; break; fi
     sleep 5
 done
 mark "boot_completed=$booted after $(($(date +%s) - t0))s" \
@@ -77,16 +80,18 @@ if [ "$booted" != "1" ]; then
     exit 1
 fi
 
-mark "android $(adbs shell getprop ro.build.version.release) sdk=$(adbs shell getprop ro.build.version.sdk)" \
-    "abis=$(adbs shell getprop ro.product.cpu.abilist) adb_user=$(adbs shell id -un)"
-mark "cameras: $(adbs shell dumpsys media.camera | grep -m1 -i 'number of camera devices' | xargs)" \
-    "hal_providers=$(adbs shell dumpsys media.camera | grep -ci 'provider')"
-mark "focus: $(adbs shell dumpsys window | grep -m1 mCurrentFocus | xargs)"
-mark "settings app: $(adbs shell am start -W -a android.settings.SETTINGS | grep -E 'Status|TotalTime' | xargs)"
+mark "android $(andro getprop ro.build.version.release) sdk=$(andro getprop ro.build.version.sdk)" \
+    "abis=$(andro getprop ro.product.cpu.abilist)"
+quiet adb connect "$SERIAL"
+mark "adb: $(adb -s "$SERIAL" shell 'getprop ro.build.version.release; id -un' 2>&1 | tr -d '\r' | xargs)"
+mark "cameras: $(andro dumpsys media.camera | grep -m1 -i 'number of camera devices' | xargs)" \
+    "hal_providers=$(andro dumpsys media.camera | grep -ci 'provider')"
+mark "focus: $(andro dumpsys window | grep -m1 mCurrentFocus | xargs)"
+mark "settings app: $(andro am start -W -a android.settings.SETTINGS | grep -E 'Status|TotalTime' | xargs)"
 
 sleep 30  # let the launch settle before measuring
 busy=$(mpstat 60 1 | awk '/^Average/ {printf "%.1f", 100 - $NF}')
 mark "cpu over 60s with Settings open: ${busy}% busy across $(nproc) cpus;" \
     "container $(docker stats --no-stream --format '{{.CPUPerc}} cpu {{.MemUsage}}' redroid)"
-mark "screencap: $(adb -s "$SERIAL" exec-out screencap -p 2>> "$LOG" | wc -c) bytes PNG"
+mark "screencap: $(docker exec redroid /system/bin/screencap -p 2>> "$LOG" | wc -c) bytes PNG"
 mark "DONE spike finished $(date -u +%FT%TZ)"
