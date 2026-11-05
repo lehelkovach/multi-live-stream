@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import shlex
 from dataclasses import dataclass
+from pathlib import Path
 from urllib.parse import urlsplit
 
 from core.models import Profile
@@ -56,8 +57,24 @@ def profile_args(spec: OutputSpec) -> list[str]:
     raise ValueError(msg)
 
 
+def tls_args(url: str, ca_file: str) -> list[str]:
+    """Make ffmpeg check an RTMPS platform's certificate; without this it accepts any
+    certificate, so whoever sits on the path could read the stream key."""
+    if urlsplit(url).scheme != "rtmps" or not ca_file:
+        return []
+    if not Path(ca_file).is_file():
+        msg = f"CA bundle {ca_file} not found (set OMNI_RELAY_TLS_CA_FILE)"
+        raise ValueError(msg)
+    return ["-tls_verify", "1", "-ca_file", ca_file]
+
+
 def build_command(
-    ffmpeg_bin: str, input_url: str, spec: OutputSpec, *, rtsp_timeout_s: float = 10.0
+    ffmpeg_bin: str,
+    input_url: str,
+    spec: OutputSpec,
+    *,
+    rtsp_timeout_s: float = 10.0,
+    tls_ca_file: str = "",
 ) -> list[str]:
     """Full argv for one relay worker. Progress goes to stdout, diagnostics to stderr."""
     cmd = [
@@ -71,6 +88,7 @@ def build_command(
     cmd += ["-i", input_url]
     cmd += profile_args(spec)
     cmd += output_format_args(spec.url)
+    cmd += tls_args(spec.url, tls_ca_file)
     cmd.append(spec.url)
     return cmd
 

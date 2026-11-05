@@ -361,3 +361,38 @@ async def test_workers_are_poked_only_while_input_is_live(
     await s.reconcile()  # relay off: worker stopped, nothing poked
     assert worker.pokes == 2
     assert worker.stopped
+
+
+async def test_rtmps_certificates_are_verified_and_a_missing_bundle_is_reported(
+    settings: Settings,
+    sup: tuple[Supervisor, FakeMediaMTX],
+    engine: Engine,
+    box: SecretBox,
+    redis_sync: fakeredis.FakeRedis,
+    tmp_path: Path,
+) -> None:
+    s, mtx = sup
+    mtx.live = True
+    bundle = tmp_path / "ca.crt"
+    bundle.write_text("test bundle")
+    s.settings = settings.model_copy(update={"relay_tls_ca_file": str(bundle)})
+    fb = add_dest(engine, box, "facebook")
+    yt = add_dest(engine, box, "youtube")
+    with Session(engine) as session:
+        row = session.get(Destination, fb)
+        assert row is not None
+        row.rtmp_url = "rtmps://live-api-s.facebook.com:443/rtmp"
+        session.add(row)
+        session.commit()
+    await s.reconcile()
+    fb_cmd = s.workers[fb].cmd
+    assert fb_cmd[fb_cmd.index("-ca_file") + 1] == str(bundle)
+    assert "-tls_verify" not in s.workers[yt].cmd  # plain RTMP has no TLS
+
+    # the bundle disappears (e.g. an image without ca-certificates): only RTMPS stops
+    bundle.unlink()
+    await s.reconcile()
+    assert set(s.workers) == {yt}
+    st = read_status(redis_sync, fb)
+    assert st["status"] == "error"
+    assert "OMNI_RELAY_TLS_CA_FILE" in st["detail"]

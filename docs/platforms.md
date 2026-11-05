@@ -22,10 +22,14 @@ Verified in Phase 1 against two local MediaMTX "fake platforms" (RTMP). RTMPS
 verified on 2026-11-03: the relay's exact command, run with the image's ffmpeg
 (5.1.9, Debian 12 package: GnuTLS + libsrt compiled in), pushed `-c copy` H.264 +
 AAC to a MediaMTX that only accepts RTMPS (`rtmpEncryption: strict`), and the
-received stream decoded cleanly. That ffmpeg does not verify the platform's TLS
-certificate (it accepted a self-signed one), so a network-level attacker between
-the VM and the platform could read the stream key; OBS itself does verify. Not yet
-run against the real platforms: check the first live run with `make logs S=relay`.
+received stream decoded cleanly. ffmpeg does not check the platform's TLS
+certificate unless told to (it accepted a self-signed one), so the relay passes
+`-tls_verify 1 -ca_file $OMNI_RELAY_TLS_CA_FILE` (default: the image's system CA
+bundle) on every RTMPS output; with that, an untrusted certificate is refused and
+the right one streams. Not yet run against the real platforms: check the first live
+run with `make logs S=relay`. If a platform's certificate is ever refused, that
+destination alone shows the TLS error; `OMNI_RELAY_TLS_CA_FILE=` (empty) turns
+checking off.
 
 Keyframe interval: YouTube/Twitch/Facebook want a keyframe every 2 s (Kick/X are
 fine with it too). Set OBS to a 2 s keyframe interval; `copy` cannot change it.

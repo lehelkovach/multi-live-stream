@@ -1,10 +1,18 @@
 from __future__ import annotations
 
 import random
+from pathlib import Path
 
 import pytest
 
-from relay.ffmpeg import OutputSpec, Progress, build_command, output_format_args, redact
+from relay.ffmpeg import (
+    OutputSpec,
+    Progress,
+    build_command,
+    output_format_args,
+    redact,
+    tls_args,
+)
 from relay.worker import _Samples, compute_backoff
 
 INPUT = "rtsp://mediamtx:8554/live/secretkey"
@@ -24,6 +32,20 @@ def test_copy_profile_is_default_and_never_encodes() -> None:
     assert "-timeout" in cmd
     assert "-progress" in cmd
     assert cmd[cmd.index("-progress") + 1] == "pipe:1"
+
+
+def test_rtmps_outputs_verify_the_platform_certificate(tmp_path: Path) -> None:
+    bundle = tmp_path / "ca.crt"
+    bundle.write_text("test bundle")
+    url = "rtmps://live-api-s.facebook.com:443/rtmp/key"
+    cmd = build_command("ffmpeg", INPUT, OutputSpec(url), tls_ca_file=str(bundle))
+    assert cmd[-5:] == ["-tls_verify", "1", "-ca_file", str(bundle), url]
+    # plain RTMP, SRT and an empty setting add nothing
+    assert tls_args("rtmp://a.rtmp.youtube.com/live2/k", str(bundle)) == []
+    assert tls_args("srt://host:9000?streamid=x", str(bundle)) == []
+    assert tls_args(url, "") == []
+    with pytest.raises(ValueError, match="OMNI_RELAY_TLS_CA_FILE"):
+        tls_args(url, str(tmp_path / "missing.crt"))
 
 
 def test_vertical_profile_reencodes_to_9_16() -> None:

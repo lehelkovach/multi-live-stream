@@ -54,6 +54,8 @@ class Settings(BaseSettings):
 
     # --- relay -------------------------------------------------------------
     ffmpeg_bin: str = "ffmpeg"
+    # RTMPS destinations' certificates are checked against this bundle; "" disables it
+    relay_tls_ca_file: str = "/etc/ssl/certs/ca-certificates.crt"
     relay_poll_interval: float = 2.0  # seconds between reconcile passes
     relay_backoff_base: float = 1.0  # first retry delay (doubles each failure)
     relay_backoff_max: float = 60.0  # cap for the retry delay

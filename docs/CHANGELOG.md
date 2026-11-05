@@ -8,6 +8,10 @@ One entry per completed phase (plus notable fixes). Newest first.
   throwaway A1 VM; reports binder/memfd support, Redroid 14 boot time, camera count
   and CPU use on the serial console. `provision.py up --script` launches it.
 * RTMPS relay output verified with the image's ffmpeg against an RTMPS-only server.
+* Fixed: the relay accepted any TLS certificate on RTMPS outputs (ffmpeg's default),
+  so someone on the network path could read Facebook/Kick stream keys. RTMPS
+  outputs now verify against `OMNI_RELAY_TLS_CA_FILE` (system bundle by default);
+  a missing bundle marks only the RTMPS destinations as errored.
 
 ## Oracle Cloud deployment tooling (2026-10-30)
 

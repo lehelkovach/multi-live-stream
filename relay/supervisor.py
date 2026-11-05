@@ -180,7 +180,10 @@ class Supervisor:
                     )
                     spec = OutputSpec(dest.output_url(key), dest.profile, dest.ffmpeg_args)
                     cmd = build_command(
-                        self.settings.ffmpeg_bin, self.settings.ingest_rtsp_url, spec
+                        self.settings.ffmpeg_bin,
+                        self.settings.ingest_rtsp_url,
+                        spec,
+                        tls_ca_file=self.settings.relay_tls_ca_file,
                     )
                 except (DecryptError, ValueError) as exc:
                     invalid[dest.id] = str(exc)
