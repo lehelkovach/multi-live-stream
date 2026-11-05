@@ -50,5 +50,8 @@ Accounts tab then shows a **Connect** button per platform.
       access token via "Token" on the Accounts tab.
 
 ## Later phases
-- [ ] Phase 5: decide which mobile app(s) to target first; accept the
-      terms-of-service risk noted in `docs/mobile-spike.md` once written.
+- [ ] **Phase 5 (mobile apps)**: Redroid now runs on OCI (see
+      `docs/mobile-spike.md` Findings); the next spike step, a virtual camera inside
+      Android, needs from you: which app to target first, its APK (or Play access),
+      an account to sign in with, and a yes/no on the terms-of-service risk in
+      section 3 of that file.

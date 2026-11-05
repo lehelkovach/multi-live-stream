@@ -7,6 +7,10 @@ One entry per completed phase (plus notable fixes). Newest first.
 * `mobile/spike/redroid-cloud-init.sh`: Phase 5a spike as a first-boot script for a
   throwaway A1 VM; reports binder/memfd support, Redroid 14 boot time, camera count
   and CPU use on the serial console. `provision.py up --script` launches it.
+* Spike result on OCI A1 (kernel 7.0 "oracle"): binder loads, Redroid 14 boots in
+  15 s, adb works, idle CPU ~0; Android sees **no camera**, as predicted. The
+  virtual camera is the remaining Phase 5 risk. Spike VM and network deleted.
+* The OmniStream VM was rebuilt on the commit with the RTMPS certificate check.
 * RTMPS relay output verified with the image's ffmpeg against an RTMPS-only server.
 * Fixed: the relay accepted any TLS certificate on RTMPS outputs (ffmpeg's default),
   so someone on the network path could read Facebook/Kick stream keys. RTMPS

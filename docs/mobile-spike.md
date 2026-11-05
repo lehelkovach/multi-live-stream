@@ -1,6 +1,7 @@
 # Phase 5a spike: streaming into mobile-only apps (Redroid + Appium)
 
-Status: **desk research + runbook, 2026-10-25.** The hands-on part (booting Redroid
+Status: **desk research + runbook, 2026-10-25; Redroid boot verified on OCI
+2026-11-05 (see Findings).** The hands-on part (booting Redroid
 on the OCI Ampere VM and feeding it video) can only be done on the VM itself, so
 this document records what the current docs say, the exact commands to run, what
 to measure, and the go/no-go criteria. Results go into the "Findings" section at
@@ -139,8 +140,16 @@ app open. The virtual-camera, app sign-in and 30-minute rows need hands-on work.
 
 | Date | Step | Result | Notes |
 |------|------|--------|-------|
-|      | modprobe binder_linux on OCI Ubuntu 24.04 arm64 | | kernel version: |
-|      | redroid 14 `_64only` boots, adb connects | | CPU idle %: |
+| 2026-11-05 | modprobe binder_linux on OCI Ubuntu 24.04 arm64 | **works** | kernel `7.0.0-1013-oracle` (VM.Standard.A1.Flex, 2 OCPU / 8 GB), 4 KB pages. `CONFIG_ANDROID_BINDER_IPC=m`, `CONFIG_ANDROID_BINDERFS=m`: binder ships in the base modules, and there is no `linux-modules-extra` package for this kernel (none needed). No ashmem, so `androidboot.use_memfd=true`; `/dev/dma_heap/system` present. |
+| 2026-11-05 | redroid 14 `_64only` boots, adb connects | **works** | Image pull 31 s (2.2 GB). `sys.boot_completed=1` 15 s after `docker run`; Android 14, SDK 34, `arm64-v8a`; launcher in focus; Settings opens in 520 ms; `adb shell` connects as user `shell` (root not checked yet). CPU 0.4 % of 2 cores, 584 MiB RAM with Settings on screen. That is a **static** screen (Android only redraws on change), so it says nothing about the 720p30 preview load in the go/no-go. |
+| 2026-11-05 | camera presence | **none, as expected** | `dumpsys media.camera`: "Number of camera devices: 0", no camera HAL provider. Confirms section 2: apps will find no camera until option A, B or D supplies one. |
 |      | virtual camera option A | | module/version: |
 |      | target app sign-in + detection | | |
 |      | go live 30 min | | |
+
+**So far:** Redroid itself is not the obstacle on OCI Ampere: it boots fast and idles
+near zero. The open question is the one section 2 predicted: getting a camera into
+Android. Next, in order: check `adb root` / `ro.debuggable` on the image (option A needs
+root), then try option A on this image with the target app. That step needs the owner:
+which app first, its APK, an account to sign in with, and accepting the ToS risk
+(section 3).
