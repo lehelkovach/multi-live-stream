@@ -1,5 +1,6 @@
 """Process fixtures for integration tests: redis-server, two MediaMTX instances, the API
-(uvicorn in a thread), and ``python -m relay`` as a subprocess.
+(uvicorn in a thread), and ``python -m relay`` as a subprocess. The "fake platform"
+MediaMTX also serves RTMPS with a certificate for ``localhost`` that the relay trusts.
 
 Everything binds to random localhost ports. Skipped when a binary is missing:
 ``mediamtx`` (or $MEDIAMTX_BIN), ``ffmpeg``, ``redis-server``.
@@ -142,6 +143,7 @@ class MediaMTX:
     rtmp_port: int
     rtsp_port: int
     proc: Proc
+    rtmps_port: int = 0
 
     def paths(self) -> dict[str, dict[str, Any]]:
         resp = httpx.get(f"{self.api_url}/v3/paths/list", params={"itemsPerPage": 100}, timeout=2)
@@ -160,15 +162,53 @@ class MediaMTX:
         return int(p.get("bytesReceived", 0)) if p else 0
 
 
-def start_mediamtx(itest_dir: Path, name: str, config: str) -> MediaMTX:
+def start_mediamtx(itest_dir: Path, name: str, config: str, **extra: str) -> MediaMTX:
     assert MEDIAMTX_BIN
-    api_port, rtmp_port, rtsp_port = free_port(), free_port(), free_port()
-    cfg = config.format(api_port=api_port, rtmp_port=rtmp_port, rtsp_port=rtsp_port)
+    api_port, rtmp_port, rtsp_port, rtmps_port = (free_port() for _ in range(4))
+    cfg = config.format(
+        api_port=api_port, rtmp_port=rtmp_port, rtsp_port=rtsp_port, rtmps_port=rtmps_port, **extra
+    )
     cfg_path = itest_dir / f"mediamtx-{name}.yml"
     cfg_path.write_text(cfg)
     proc = spawn([MEDIAMTX_BIN, str(cfg_path)], itest_dir / f"mediamtx-{name}.log")
     wait_port(api_port)
-    return MediaMTX(f"http://127.0.0.1:{api_port}", rtmp_port, rtsp_port, proc)
+    return MediaMTX(f"http://127.0.0.1:{api_port}", rtmp_port, rtsp_port, proc, rtmps_port)
+
+
+def make_tls_cert(directory: Path) -> tuple[Path, Path]:
+    """Self-signed certificate valid for the name ``localhost`` only (not 127.0.0.1)."""
+    import datetime
+
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.x509.oid import NameOID
+
+    key = ec.generate_private_key(ec.SECP256R1())
+    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "localhost")])
+    now = datetime.datetime.now(datetime.UTC)
+    cert = (
+        x509.CertificateBuilder()
+        .subject_name(name)
+        .issuer_name(name)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now - datetime.timedelta(minutes=5))
+        .not_valid_after(now + datetime.timedelta(days=1))
+        .add_extension(x509.SubjectAlternativeName([x509.DNSName("localhost")]), critical=False)
+        .add_extension(x509.BasicConstraints(ca=True, path_length=None), critical=True)
+        .sign(key, hashes.SHA256())
+    )
+    cert_path, key_path = directory / "fake-platform.crt", directory / "fake-platform.key"
+    cert_path.write_bytes(cert.public_bytes(serialization.Encoding.PEM))
+    key_path.write_bytes(
+        key.private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.PKCS8,
+            serialization.NoEncryption(),
+        )
+    )
+    return cert_path, key_path
 
 
 INGEST_CONFIG = """
@@ -202,7 +242,7 @@ paths:
   all_others:
 """
 
-# "Fake platforms": a second MediaMTX that accepts any publisher.
+# "Fake platforms": a second MediaMTX that accepts any publisher, over RTMP or RTMPS.
 DEST_CONFIG = """
 logLevel: info
 logDestinations: [stdout]
@@ -224,6 +264,10 @@ rtspAddress: 127.0.0.1:{rtsp_port}
 rtspTransports: [tcp]
 rtmp: yes
 rtmpAddress: 127.0.0.1:{rtmp_port}
+rtmpEncryption: optional
+rtmpsAddress: 127.0.0.1:{rtmps_port}
+rtmpServerKey: {tls_key}
+rtmpServerCert: {tls_cert}
 srt: no
 hls: no
 webrtc: no
@@ -255,6 +299,9 @@ class Stack:
     def dest_url(self, app: str) -> str:
         return f"rtmp://127.0.0.1:{self.dest.rtmp_port}/{app}"
 
+    def dest_url_tls(self, app: str, host: str = "localhost") -> str:
+        return f"rtmps://{host}:{self.dest.rtmps_port}/{app}"
+
     def publish_testsrc(self, url: str, seconds: float | None = None) -> subprocess.Popen[bytes]:
         assert FFMPEG_BIN
         cmd = [
@@ -278,7 +325,10 @@ def stack(itest_dir: Path, redis_server: str) -> Iterator[Stack]:
     ingest = start_mediamtx(
         itest_dir, "ingest", INGEST_CONFIG.replace("{{api_port}}", str(api_port))
     )
-    dest = start_mediamtx(itest_dir, "dest", DEST_CONFIG)
+    tls_cert, tls_key = make_tls_cert(itest_dir)
+    dest = start_mediamtx(
+        itest_dir, "dest", DEST_CONFIG, tls_cert=str(tls_cert), tls_key=str(tls_key)
+    )
 
     db_url = f"sqlite:///{itest_dir / 'omni.db'}"
     env_values = {
@@ -298,6 +348,7 @@ def stack(itest_dir: Path, redis_server: str) -> Iterator[Stack]:
         "OMNI_RELAY_BACKOFF_BASE": "0.5",
         "OMNI_RELAY_BACKOFF_MAX": "2",
         "OMNI_RELAY_STALL_TIMEOUT": "8",
+        "OMNI_RELAY_TLS_CA_FILE": str(tls_cert),  # the fake platform's certificate only
         "OMNI_WEB_DIST_DIR": str(itest_dir / "no-dist"),
     }
     settings = Settings(**{k.removeprefix("OMNI_").lower(): v for k, v in env_values.items()})  # type: ignore[arg-type]

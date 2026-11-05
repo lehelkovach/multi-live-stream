@@ -4,7 +4,8 @@
 * killing one destination's ffmpeg does not affect the other (and it comes back),
 * the wrong stream key is rejected,
 * toggling a destination stops/starts only that output,
-* the global stop switch and going offline stop everything.
+* the global stop switch and going offline stop everything,
+* RTMPS outputs (Facebook, Kick) stream only to a platform whose certificate checks out.
 """
 
 from __future__ import annotations
@@ -204,3 +205,55 @@ def test_relay_survives_bad_destination_without_affecting_good_one(stack: Stack)
         assert _status(client, good)["status"] == "live"
     for dest_id in (good, bad):
         client.delete(f"/api/v1/destinations/{dest_id}")
+
+
+def test_rtmps_output_streams_only_to_a_verified_platform(stack: Stack) -> None:
+    """The fake platform's certificate is trusted (OMNI_RELAY_TLS_CA_FILE) and names
+    ``localhost``. The same server reached as 127.0.0.1 fails the hostname check, as a
+    man-in-the-middle would, so that output must never deliver."""
+    client = stack.client()
+    trusted = client.post(
+        "/api/v1/destinations",
+        json={
+            "name": "rtmps trusted",
+            "platform": "facebook",
+            "rtmp_url": stack.dest_url_tls("tlsok"),
+            "stream_key": "fb-key-0123456789",
+        },
+    ).json()["id"]
+    mismatched = client.post(
+        "/api/v1/destinations",
+        json={
+            "name": "rtmps wrong name",
+            "platform": "kick",
+            "rtmp_url": stack.dest_url_tls("tlsbad", host="127.0.0.1"),
+            "stream_key": "kick-key-0123456789",
+        },
+    ).json()["id"]
+    try:
+        with publishing(stack):
+            wait_until(
+                lambda: stack.dest.ready("tlsok/fb-key-0123456789"),
+                timeout=40,
+                what="rtmps output ready",
+            )
+            source = (stack.dest.path("tlsok/fb-key-0123456789") or {}).get("source") or {}
+            assert source.get("type") == "rtmpsConn"  # really TLS, not a plain-RTMP fallback
+            wait_until(
+                lambda: _status(client, mismatched)["status"] in ("retrying", "error"),
+                timeout=30,
+                what="unverified rtmps output retrying",
+            )
+            # the dashboard says why: realistic keys keep redaction from mangling it
+            assert "certificate" in _status(client, mismatched)["last_error"]
+            assert (
+                stack.dest.path("tlsbad/kick-key-0123456789") is None
+            )  # nothing was ever published
+            wait_until(
+                lambda: _status(client, trusted)["status"] == "live",
+                timeout=20,
+                what="rtmps output live",
+            )
+    finally:
+        for dest_id in (trusted, mismatched):
+            client.delete(f"/api/v1/destinations/{dest_id}")

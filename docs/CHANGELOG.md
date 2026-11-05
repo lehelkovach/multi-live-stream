@@ -16,6 +16,9 @@ One entry per completed phase (plus notable fixes). Newest first.
   so someone on the network path could read Facebook/Kick stream keys. RTMPS
   outputs now verify against `OMNI_RELAY_TLS_CA_FILE` (system bundle by default);
   a missing bundle marks only the RTMPS destinations as errored.
+* Integration test: the fake platform also serves RTMPS with a generated certificate;
+  a trusted RTMPS output goes live (as `rtmpsConn`), one failing the hostname check
+  is refused with a certificate error. Disabling verification makes it fail.
 
 ## Oracle Cloud deployment tooling (2026-10-30)
 
