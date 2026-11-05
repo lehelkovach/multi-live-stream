@@ -10,6 +10,9 @@ One entry per completed phase (plus notable fixes). Newest first.
 * Spike result on OCI A1 (kernel 7.0 "oracle"): binder loads, Redroid 14 boots in
   15 s, adb works, idle CPU ~0; Android sees **no camera**, as predicted. The
   virtual camera is the remaining Phase 5 risk. Spike VM and network deleted.
+* Second spike run across Android 16/15/14: 14 and 15 are rootable (`userdebug`);
+  Redroid 15 ships AOSP's virtual camera HAL with its flags on, so a no-hook virtual
+  camera (option D) is the preferred route; 16 did not boot. VM deleted again.
 * The OmniStream VM was rebuilt on the commit with the RTMPS certificate check.
 * RTMPS relay output verified with the image's ffmpeg against an RTMPS-only server.
 * Fixed: the relay accepted any TLS certificate on RTMPS outputs (ffmpeg's default),

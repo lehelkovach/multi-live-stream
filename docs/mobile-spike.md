@@ -143,13 +143,29 @@ app open. The virtual-camera, app sign-in and 30-minute rows need hands-on work.
 | 2026-11-05 | modprobe binder_linux on OCI Ubuntu 24.04 arm64 | **works** | kernel `7.0.0-1013-oracle` (VM.Standard.A1.Flex, 2 OCPU / 8 GB), 4 KB pages. `CONFIG_ANDROID_BINDER_IPC=m`, `CONFIG_ANDROID_BINDERFS=m`: binder ships in the base modules, and there is no `linux-modules-extra` package for this kernel (none needed). No ashmem, so `androidboot.use_memfd=true`; `/dev/dma_heap/system` present. |
 | 2026-11-05 | redroid 14 `_64only` boots, adb connects | **works** | Image pull 31 s (2.2 GB). `sys.boot_completed=1` 15 s after `docker run`; Android 14, SDK 34, `arm64-v8a`; launcher in focus; Settings opens in 520 ms; `adb shell` connects as user `shell` (root not checked yet). CPU 0.4 % of 2 cores, 584 MiB RAM with Settings on screen. That is a **static** screen (Android only redraws on change), so it says nothing about the 720p30 preview load in the go/no-go. |
 | 2026-11-05 | camera presence | **none, as expected** | `dumpsys media.camera`: "Number of camera devices: 0", no camera HAL provider. Confirms section 2: apps will find no camera until option A, B or D supplies one. |
+| 2026-11-05 | root (needed by option A) | **available** | Redroid 14 and 15 images are `userdebug` (`ro.debuggable=1`); `adb root` switches adbd to root. |
+| 2026-11-05 | option D pieces (AOSP virtual camera) | **present on Android 15**, absent on 14 | Redroid 15 (SDK 35, boots in 21 s, 875 MiB): `/system/bin/virtual_camera` exists; aconfig flags `android.companion.virtual.flags.virtual_camera`, `android.companion.virtualdevice.flags.camera_device_awareness` and `.virtual_camera_service_discovery` are enabled; the `virtualdevice` service is running. No camera provider is registered until a virtual device creates a camera, so the camera count is still 0. |
+| 2026-11-05 | Redroid 16 | **did not boot** | Same parameters: `sys.boot_completed` still 0 after 6 min, container running, no container logs. Not investigated; 15 has what option D needs. |
 |      | virtual camera option A | | module/version: |
 |      | target app sign-in + detection | | |
 |      | go live 30 min | | |
 
 **So far:** Redroid itself is not the obstacle on OCI Ampere: it boots fast and idles
 near zero. The open question is the one section 2 predicted: getting a camera into
-Android. Next, in order: check `adb root` / `ro.debuggable` on the image (option A needs
-root), then try option A on this image with the target app. That step needs the owner:
-which app first, its APK, an account to sign in with, and accepting the ToS risk
-(section 3).
+Android. Both routes are open on Redroid 15:
+
+* **Option D (preferred): AOSP's virtual camera.** A real camera HAL fed through a
+  Surface, no hooks in the target app. Creating a virtual device needs a system app
+  holding a companion-device role with a CDM association. On this rooted image we can
+  install our own small "camera bridge" app as a system app and grant both from the
+  root shell. The bridge decodes our RTSP stream (`MediaCodec`) into the virtual
+  camera's Surface. Catch: with `camera_device_awareness`, only apps running on the
+  virtual device's display see that camera, so the target app must be launched
+  there, and Appium has to drive it on that display.
+* **Option A (fallback): camera-hook modules** (LSPosed + VCAM/CamSwap-style). Root is
+  available. But hooks are what detection libraries look for, and the modules are
+  small unvetted projects.
+
+**Next, without the owner:** build the bridge app and prove a stock camera app on the
+virtual display shows our test pattern. **Then, with the owner:** the target app (which
+app, its APK, an account, and the ToS decision in section 3).
